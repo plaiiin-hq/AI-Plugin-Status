@@ -1,8 +1,18 @@
 # Every API endpoint
 
 Generated from the server source, so it reflects what exists rather than what was
-written down. **🔒 marks endpoints behind a role gate** (`STATUS_ADMIN` / `INFRA_ADMIN`);
-everything else needs only a valid key.
+written down.
+
+| Mark | Gate |
+|---|---|
+| 🔒 | `STATUS_ADMIN` **or** `INFRA_ADMIN` |
+| 🔑 | `STATUS_ADMIN` **only** — one tier tighter, for the writes that ship code or delete history |
+| — | any valid key **that carries at least one Status role** |
+
+⚠️ **"Authenticated" is no longer enough.** A signed-in account with no Status role gets a
+`403` on every `/api/**` path but one: `GET /api/user/profile`, which the waiting screen polls
+until an admin grants a role. Anonymous still gets `401`. So a `403` on a read as plain as
+`/api/tree` means *this account has no role yet*, not *this endpoint is admin-only*.
 
 Ask a running server what it supports with `GET /api/capabilities` — that beats this file
 if they ever disagree.
@@ -13,7 +23,7 @@ if they ever disagree.
 | Endpoint | |
 |---|---|
 | `GET /api/auth-config` | Auth discovery — always public so the mobile app knows how to authenticate |
-| `GET /api/commands/result` | Get the latest structured result for a command |
+| `GET /api/commands/result?command=<id>` 🔒 | Latest structured result for a command. `command` is required — without it, `400` |
 | `GET /api/events` |  |
 | `GET /api/global` | Global state — replaces GlobalModelAdvice |
 | `GET /api/history` |  |
@@ -22,11 +32,11 @@ if they ever disagree.
 | `GET /api/presence` |  |
 | `POST /api/presence/ping` |  |
 | `POST /api/probes/debug` | Toggle debug mode for a probe — enables ctx |
-| `GET /api/probes/history` | Get history for a probe at a given resolution and path |
+| `GET /api/probes/history?probe=<name>` | History at a given `resolution` and `path`. **`probe` is required** — without it, `400` |
 | `GET /api/probes/history/list` | List all probes with history data |
-| `GET /api/probes/infographic` | Get infographic SVG + resolved patches for a probe |
-| `GET /api/probes/result` | Get the latest structured result for a probe |
-| `GET /api/probes/snapshot` | Get latest snapshot of all paths for a probe |
+| `GET /api/probes/infographic?probe=<name>` | Infographic SVG + resolved patches |
+| `GET /api/probes/result?probe=<name>` | Latest structured result. **`probe` is required** |
+| `GET /api/probes/snapshot?probe=<name>` | Latest value of every path. **`probe` is required** |
 | `GET /api/status` |  |
 | `GET /api/tree` | Path-based tree built from all probe names + history probes |
 | `GET /api/untracked-issues` | Degraded probes in mapped projects — used by the topbar alert badge |
@@ -48,6 +58,20 @@ if they ever disagree.
 
 ## Probe authoring (Probe IDE)
 
+⚠️ **Every content endpoint here takes a `ref`** — `live` (the default), `dev/<label>` or
+`rel/<version>`. A GET takes it as `?ref=`, a POST as a `ref` field in the body. Two refusals
+follow from that and they are the ones that surprise a caller written before versioning:
+
+| Write | Answer |
+|---|---|
+| `ref=rel/<version>` | `409 Release versions are immutable — branch a dev version from it` |
+| `ref=live` on an entry whose live version came from a library | `409 <id> runs <library> <version> — edits go into a dev version` |
+
+Since nothing ships in the jar any more, **almost everything installed is library-sourced**, so
+a bare `probe-save`/`command-save` with no `ref` is the refused case, not the working one. The
+authoring loop is `*-version-create` → edit at `ref=dev/<label>` → `*-version-release`
+→ `*-version-activate`. See *Versions* below and `SKILL.md` → *Probe authoring over the API*.
+
 | Endpoint | |
 |---|---|
 | `POST /api/ide/command-create` 🔒 | Create a new command from scratch |
@@ -62,9 +86,9 @@ if they ever disagree.
 | `POST /api/ide/probe-create` 🔒 | Create a new probe from scratch |
 | `GET /api/ide/probe-definition` 🔒 | Get probe definition YAML |
 | `POST /api/ide/probe-definition` 🔒 | Save probe definition YAML |
-| `POST /api/ide/probe-dev` 🔒 | Keep old probe-dev endpoint for backward compat |
-| `POST /api/ide/probe-save` 🔒 | Save probe script (check |
-| `GET /api/ide/probe-source?name=<id>` 🔒 | Get check.js source. **Param is `name`, not `id`** — a wrong param name returns a 302, not a 400 |
+| `POST /api/ide/probe-dev` 🔒 | **410 Gone** — alias of `toggle-dev`, retired with it |
+| `POST /api/ide/probe-save` 🔒 | Save probe script (`check.js`) at `ref` — 409 on a library-sourced `live` |
+| `GET /api/ide/probe-source?name=<id>` 🔒 | Get `check.js` source. `?name=` and `?id=` are both accepted now; a missing one is a 400 naming both |
 | `GET /api/ide/probe-svg` 🔒 | Get infographic SVG templates (light + dark) for a probe |
 | `POST /api/ide/probe-svg` 🔒 | Save infographic SVG templates (light + optional dark) |
 | `GET /api/ide/probes` 🔒 | List installed probe definitions from the catalog (the editable probe types, not running instances) |
@@ -73,17 +97,98 @@ if they ever disagree.
 | `POST /api/ide/test` 🔒 | Test-run: fetch URL, run script, return result tree |
 | `POST /api/ide/test-on-agent` 🔒 | Queue a test-probe execution on a specific agent |
 | `GET /api/ide/test-on-agent/{id}` 🔒 | Poll for test-probe result |
-| `POST /api/ide/toggle-dev` 🔒 | Toggle dev flag on a probe or command manifest |
+| `POST /api/ide/toggle-dev` 🔒 | **410 Gone** for both kinds — `dev: true` was replaced by the version store. The body names that kind's own version endpoints |
 
-## Probe catalog
+### Versions
+
+The same five verbs for each kind, over one implementation. `probe-…` and `command-…` are the
+only difference; a probe and a command may share an id, so the endpoint name carries the kind
+rather than a `?kind=` param.
 
 | Endpoint | |
 |---|---|
-| `GET /api/catalog` | Full catalog state — installed + available from built-in |
-| `POST /api/catalog/install/{id}` | Install a probe command from the built-in catalog |
-| `GET /api/catalog/sync` | Agent catalog sync — returns installed entries + hash |
-| `POST /api/catalog/uninstall/{id}` | Uninstall a probe command — removes from installed folder |
-| `POST /api/catalog/update/{id}` | Update an installed entry to the latest built-in version |
+| `GET /api/ide/probe-versions?id=` 🔒 | `{id, kind, live, liveDirty, origin, releases[], dev[]}` — the whole version bar in one read |
+| `GET /api/ide/command-versions?id=` 🔒 | The same for a command |
+| `POST /api/ide/probe-version-create` 🔒 | `{id, label, basedOn}` — new draft; `basedOn` defaults to `live`. Returns `{ref:"dev/<label>"}` |
+| `POST /api/ide/command-version-create` 🔒 | |
+| `POST /api/ide/probe-version-delete` 🔒 | `{id, ref:"dev/<label>"}` — drafts only; `live` and `rel/*` are refused |
+| `POST /api/ide/command-version-delete` 🔒 | |
+| `POST /api/ide/probe-version-release` 🔒🔑 | `{id, ref, version, note, activate}` — **`STATUS_ADMIN` only**, one tier above the rest of `/api/ide/**`: a release plus `activate: true` ships code to every agent in one call |
+| `POST /api/ide/command-version-release` 🔒🔑 | Same, and for a sharper reason — a command runs with `ctx.shell` the moment it is activated |
+| `POST /api/ide/probe-version-activate` 🔒🔑 | `{id, version, discardLiveEdits}` — this is also rollback: activating an older release is the same verb |
+| `POST /api/ide/command-version-activate` 🔒🔑 | |
+
+`origin` on the read tells you provenance: `{kind:"library", library, path, commit,
+importedVersion}` for something imported, `null` for something authored here. ⚠️ **Decide "who
+wrote this" from `origin` (or a release's `source`/`library`), never from `builtinIds`** — see
+the catalog section.
+
+## Probe and command catalog
+
+| Endpoint | |
+|---|---|
+| `GET /api/catalog` | Full catalog state — see the key list below |
+| `POST /api/catalog/install/{id}` | **410 Gone** — there is no built-in catalog to install from. Use `POST /api/libraries/{name}/{probes\|commands}/{id}/import` |
+| `POST /api/catalog/update/{id}` | **410 Gone** — a former built-in's update arrives as a library update now |
+| `GET /api/catalog/sync` 🔒 | The installed catalog + its hash. **Admin only** — it used to be public "for agents", but an agent receives its scripts inside its heartbeat's probe assignments and has never called this |
+| `GET /api/catalog/uninstall/{id}/impact` 🔒🔑 | What uninstalling loses: `releases`, `devVersions`, what is using it, and a `message` built from them. `?kind=command` asks about the command of that id |
+| `POST /api/catalog/uninstall/{id}` 🔒🔑 | Uninstall. `STATUS_ADMIN` only — it takes the whole version history with it. Refused 409 while wired in `infrastructure.yml` (`wiredChecks`) or, for a command, while a preset or a queued dispatch names it |
+
+### The catalog key is `(kind, id)`, not `id`
+
+A probe and a command **may share an id**. So on `/api/catalog/uninstall/{id}` and its
+`/impact`: an explicit `?kind=probe`/`?kind=command` wins; with exactly one kind installed that
+kind is used; **with both installed and no `kind`, nothing happens and you get a `409` whose
+`kinds` array names them**. A client that sends a bare id and expects success is the one that
+breaks here.
+
+### `GET /api/catalog` — the keys that matter
+
+| Key | |
+|---|---|
+| `installedProbes` · `installedCommands` | Maps of what is live, keyed by id |
+| `libraryProbes[]` · `libraryCommands[]` | What every configured library offers, each row with `library`, `version`, `installed`, `liveVersion`, `liveSource`, `updateAvailable`, `state` |
+| `dormantProbes` · `dormantCommands` | Installed, but their library is switched off — a dormant command refuses at dispatch with a stated reason rather than running a script with no source |
+| `updates[]` | Probe updates. ⚠️ Command updates are under **`libraryCommandUpdates[]`**, deliberately not merged in: every button in the probe Updates list posts to the *probe* update endpoint |
+| `modifiedEntries[]` | `probe:<id>` / `command:<id>` — locally edited. The older `modified[]` is bare ids and cannot distinguish the kinds |
+| `catalogHash` | Change detection |
+| `builtinIds` · `availableProbes` · `availableCommands` | ⛔ **Always empty.** Kept so an old client still decodes, but nothing is built in any more. **A "Built-In" badge computed from `builtinIds` silently disappears** — this is exactly the bug the iOS client shipped. Read `origin.library` / `liveLibrary` instead, and show "Yours" when there is none |
+
+An entry in `installedProbes`/`installedCommands` also carries `liveSource` (`library` or
+`local`), `liveLibrary`, `version` and `deliverable` — enough to label provenance without a
+second call.
+
+## Probe and command libraries
+
+**This is where probes and commands come from.** A library is a git repository holding
+`library.yml` plus `probes/<id>/` and `commands/<id>/` directories; the server clones it,
+verifies it, and offers its entries for import. Both kinds come from one, and one library may
+publish both.
+
+| Endpoint | |
+|---|---|
+| `GET /api/libraries` 🔒 | Configured libraries, each with `source`, `tracking`, `lastCommit`, `probeCount`, `commandCount`, `enabled`, `autoUpdate`, `autoApplyProbeUpdates`, `autoApplyCommandUpdates`, `installAll`, `credential`, `lastError`, `warnings[]` |
+| `GET /api/libraries/{name}/probes` 🔒 | What it offers, with per-entry `installed` / `updateAvailable` / `collision` |
+| `GET /api/libraries/{name}/probes/{id}` 🔒 | One entry, with its files |
+| `GET /api/libraries/{name}/commands` 🔒 | The same for commands |
+| `GET /api/libraries/{name}/commands/{id}` 🔒 | |
+| `GET /api/libraries/{name}/impact` 🔒 | What turning it off or removing it would strip |
+| `POST /api/libraries` 🔑 | Add one |
+| `PATCH /api/libraries/{name}` 🔑 | Any of `{enabled, autoUpdate, autoApplyProbeUpdates, autoApplyCommandUpdates, ref, credential}`. The two auto-apply flags are **API-only** — the UI shows neither |
+| `DELETE /api/libraries/{name}` 🔑 | Remove it — and its entries' presets and wiring, in one recorded `infrastructure.yml` change |
+| `POST /api/libraries/{name}/refresh` 🔑 | Re-fetch now |
+| `POST /api/libraries/{name}/probes/{id}/import` 🔑 | **The replacement for `catalog/install`** — records a release, an origin and a diff |
+| `POST /api/libraries/{name}/commands/{id}/import` 🔑 | |
+| `POST /api/libraries/{name}/probes/{id}/update` 🔑 | **The replacement for `catalog/update`** |
+| `POST /api/libraries/{name}/commands/{id}/update` 🔑 | ⚠️ Do **not** post a command id to the probe endpoint — the kind is in the path, and the catalog's `libraryCommandUpdates[]` is kept separate precisely so a UI cannot make that mistake |
+
+Three things worth knowing before writing against these:
+
+| | |
+|---|---|
+| A library's entries run on your hosts | `ctx.shell` is live on an agent unless `AGENT_READONLY` is set, so **write access to a library repository is write access to every monitored host**. The perimeter is the repo, not the endpoint |
+| `autoApplyCommandUpdates` is independent of `autoApplyProbeUpdates` | Off by default, and the probe flag never carries a command with it |
+| A switched-off library leaves its entries **dormant** | They stay installed and listed under `dormantProbes`/`dormantCommands`; a dormant command refuses at dispatch (`refused: <id> is not runnable: library <name> is off`) rather than running a script whose source is gone |
 
 ## Agents
 
@@ -180,29 +285,30 @@ gate** in this implementation: a transition whose condition is false is refused 
 
 | Endpoint | |
 |---|---|
-| `GET /api/workflows` |  |
-| `PUT /api/workflows` |  |
-| `GET /api/workflows/attachable` | Types that declare { |
+| `GET /api/workflows/attachable?kind=` | Types that declare an attach point for that ref kind. ⚠️ `kind` is **required** — omit it and you get a 400 |
 | `GET /api/workflows/field-types` | The field-type definitions this server resolved, for the SPA |
 | `GET /api/workflows/types` |  |
-| `GET /api/workflows/types/{id}` |  |
-| `PUT /api/workflows/types/{id}` |  |
-| `GET /api/workflows/{type}` |  |
-| `POST /api/workflows/{type}` |  |
+| `POST /api/workflows/types` 🔒 | |
+| `GET /api/workflows/types/{id}` | One type's whole state machine — nodes, edges, fields |
+| `PUT /api/workflows/types/{id}` 🔒 | |
+| `GET /api/workflows/{type}/scripts/{filename}` 🔒 · `PUT` 🔒 | A type's action scripts |
+| `GET /api/workflows/{type}` | List instances |
+| `POST /api/workflows/{type}` | Create one — `{id?, fields:{…}}`, answers `201` |
+| `PATCH /api/workflows/{type}/{id}/fields` | `{fields:{…}, version}` — edit without transitioning |
 | `DELETE /api/workflows/{type}/{id}` |  |
 | `GET /api/workflows/{type}/{id}` |  |
 | `POST /api/workflows/{type}/{id}/actions/{actionId}` |  |
 | `GET /api/workflows/{type}/{id}/archived` |  |
 | `POST /api/workflows/{type}/{id}/attach` |  |
 | `DELETE /api/workflows/{type}/{id}/attach/{refKind}/{refId}` |  |
-| `POST /api/workflows/{type}/{id}/comments` |  |
+| `POST /api/workflows/{type}/{id}/comments` | `{text}` — ⚠️ the field is `text`, not `content` or `comment`; a wrong name posts an empty comment and answers `204` |
 | `POST /api/workflows/{type}/{id}/fields/{fieldName}/files` |  |
 | `DELETE /api/workflows/{type}/{id}/fields/{fieldName}/files/{filename:.+}` |  |
 | `GET /api/workflows/{type}/{id}/fields/{fieldName}/files/{filename:.+}` |  |
 | `GET /api/workflows/{type}/{id}/fields/{fieldName}/files/{filename:.+}/thumbnail` |  |
 | `POST /api/workflows/{type}/{id}/references` | Attach a reference (e |
 | `DELETE /api/workflows/{type}/{id}/references/{kind}` | Remove a reference from an instance's { |
-| `POST /api/workflows/{type}/{id}/transitions` |  |
+| `POST /api/workflows/{type}/{id}/transitions` | `{to, version, edgeId?, fields?, override?}`. `override` is opt-in — absent or false means a failed flow rule is a hard error |
 | `POST /api/workflows/{type}/{id}/unarchive` |  |
 
 ## Messaging

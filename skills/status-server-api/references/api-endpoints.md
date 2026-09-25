@@ -173,20 +173,21 @@ Thymeleaf routes listed below will be removed once the SPA migration is complete
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/admin/infrastructure` | Infrastructure editor page |
-| GET | `/admin/infrastructure/api/config` | Get infrastructure config |
-| GET | `/admin/infrastructure/api/types` | Get service types |
-| GET | `/admin/infrastructure/api/hosts` | Get hosts |
-| POST | `/admin/infrastructure/api/config` | Save infrastructure config |
 
-### Script Playground
+⚠️ The JSON twins that sat beside it — `/admin/infrastructure/api/config`, `/api/types`,
+`/api/hosts` — **are gone**. Every JSON endpoint lives under `/api/**` now:
+`/api/infrastructure/config`, `/api/infrastructure/types`, `/api/infrastructure/hosts`. An
+`X-API-Key` on an old path does not fail cleanly; it `302`s to the login form.
+
+### Script Playground → Probe IDE
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/admin/scripts` | Script playground page |
-| GET | `/admin/scripts/api/list` | List scripts |
-| GET | `/admin/scripts/api/{name}` | Get script by name |
-| POST | `/admin/scripts/api/test` | Test/run script |
-| POST | `/admin/scripts/api/save` | Save script |
+| GET | `/admin/scripts` | **Redirect to `/app/ide`** — the page went with the SPA |
+
+⚠️ `/admin/scripts/api/list`, `/{name}`, `/test` and `/save` **are gone**. Use
+`/api/ide/list`, `/api/ide/script/{name}`, `/api/ide/test` and `/api/ide/save`, and see
+`api-surface.md` → *Probe authoring* for the version rules that now govern every write.
 
 ## Drills
 
@@ -196,7 +197,9 @@ Thymeleaf routes listed below will be removed once the SPA migration is complete
 | POST | `/drills/{id}/accept` | Accept/acknowledge drill |
 | POST | `/drills/trigger` | Trigger a drill |
 | POST | `/drills/config` | Update drill config |
-| GET | `/drills/api/active` | Get active drill |
+
+⚠️ `/drills/api/active` is gone — it is `GET /api/drills/active`. Same for `/history/{filename}`,
+which has no replacement on this chain; use `GET /api/history` and `GET /api/history/{id}`.
 
 ## Logs Viewer
 
@@ -224,5 +227,9 @@ Thymeleaf routes listed below will be removed once the SPA migration is complete
 ---
 
 > **Migration note:** Thymeleaf server-rendered pages (auth, account, admin, drills,
-> incidents web views, logs viewer, history) are being replaced by the SPA frontend
+> logs viewer, history) are being replaced by the SPA frontend
 > at `/app`. Thymeleaf will remain only for email templates.
+>
+> The legacy **incidents** pages are already gone, model and all: an incident is now a record of
+> workflow type `incident` under `/api/workflows/**`. There is no `/api/incidents` — it answers
+> `404`. See `SKILL.md` → *Incidents*.

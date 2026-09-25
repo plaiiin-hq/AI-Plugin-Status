@@ -1,6 +1,6 @@
 ---
 name: status-server-api
-description: Use when reading or driving a running Plaiiin Status server from Claude — checking what is currently red, reading the probe tree or a probe's history, opening/resolving/commenting on incidents, or authoring probes and their dashboard layouts (widgets, tiles) over the REST API. Covers X-API-Key auth, the /api/** boundary that makes wrong paths look like a login redirect, and the role gate on probe authoring. Also covers the credentials store — how a probe authenticates to what it monitors. Your own API key lives in ~/.plaiiin/status-server/env; read that before asking anyone for one.
+description: Use when reading or driving a running Plaiiin Status server from Claude — checking what is currently red, reading the probe tree or a probe's history, opening/transitioning/commenting on incidents (which are workflow records), or authoring probes, commands and their dashboard layouts (widgets, tiles) over the REST API. Covers X-API-Key auth, the /api/** boundary that makes wrong paths look like a login redirect, the role gate on probe authoring, and the version store that makes a plain save refuse. Also covers the credentials store — how a probe authenticates to what it monitors. Your own API key lives in ~/.plaiiin/status-server/env; read that before asking anyone for one.
 ---
 
 # Driving a live Status board
@@ -48,8 +48,14 @@ account you are signed in as when you click *New key* decides what the key can d
 
 | Signed in as | Key can |
 |---|---|
-| an ordinary user | read state, read history, work with incidents |
-| `STATUS_ADMIN` / `INFRA_ADMIN` | all of the above **plus** `/api/ide/**` — writing probe scripts that execute on every monitored host, and writing config |
+| an account with **no** Status role | `GET /api/user/profile` and nothing else — every other `/api/**` path answers `403` |
+| an ordinary user (any one role) | read state, read history, work with workflow records |
+| `STATUS_ADMIN` / `INFRA_ADMIN` | all of the above **plus** `/api/ide/**` — writing probe and command scripts that execute on every monitored host, and writing config |
+| `STATUS_ADMIN` alone | the tier above that: releasing and activating a version, uninstalling, and adding or removing a library |
+
+⚠️ **A `403` on a read as plain as `/api/tree` means the account has no Status role yet** — not
+that the endpoint is admin-only. Anonymous still gets `401`; that distinction is the whole
+difference between "log in" and "ask an admin for a role".
 
 Prefer a key minted by a non-admin account for anything ambient (dashboards, bots, a
 long-running assistant session). Reach for an admin key only while authoring, and revoke it
@@ -67,7 +73,11 @@ curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
 ```
 
 Roles: `VIEWER` `HISTORY_USER` `HISTORY_CONFIG` `INCIDENT_RESPONDER` `INCIDENT_MANAGER`
-`DRILL_RESPONDER` `DRILL_MANAGER` `PROBE_EDITOR` `STATUS_ADMIN` `INFRA_ADMIN`.
+`DRILL_RESPONDER` `DRILL_MANAGER` `PROBE_EDITOR` `WORK_USER` `STATUS_ADMIN` `INFRA_ADMIN`.
+
+`WORK_USER` gates the work lane and the todos probes report, and it **hides** rather than
+disables: a key without it does not see the lane at all. If a board's work column looks
+empty or missing, check this role before checking the probes.
 
 | Property | Behaviour |
 |---|---|
@@ -175,45 +185,83 @@ If this endpoint 404s you are on a build from before 2026-08-27.
 | `GET /api/status` | Overall rollup — start here for "is anything wrong". |
 | `GET /api/tree` | The **full** probe tree. The authoritative view: use it to confirm a `ref` actually resolved and a probe actually ran. |
 | `GET /api/global` | Tab list / global SPA state. |
-| `GET /api/hosts` | Hosts and their labels. |
 | `GET /api/events` | Recent state transitions. |
 | `GET /api/probes/history?probe=<name>&resolution=5s` | Time series for one probe. Resolutions step up (`5s`, `1m`, …) — ask for the coarsest that answers the question. |
 | `GET /api/probes/history/list` | Which probes have history at all. **A probe with no history has never run** — that is the trap-1 signature from `status-server-ops`. |
-| `GET /api/probes/snapshot` | Current values in one shot. |
-| `GET /api/untracked-issues` | Things failing that no incident covers yet — the natural triage queue. |
-| `GET /api/types` · `GET /api/active` · `GET /api/presence` | Probe types, active checks, who is online. |
+| `GET /api/probes/snapshot?probe=<name>` | Current value of every path for one probe. |
+| `GET /api/untracked-issues` | Things failing that no workflow record covers yet — the natural triage queue. |
+| `GET /api/presence` | Who is online. |
+| `GET /api/agents` | The agents, with their heartbeat data. |
 | `GET /api/infrastructure/config` | The whole declared infrastructure — hosts, projects, dependencies, thresholds. |
 | `GET /api/infrastructure/types` · `GET /api/infrastructure/hosts` | Service-type catalog with param metadata; host names. |
+| `GET /api/capabilities` | Vocabularies, incl. `probeCatalog` — every installed probe id. |
+
+⚠️ **`/api/hosts`, `/api/types` and `/api/active` do not exist** (404). Earlier revisions of
+this file listed them. Use `/api/infrastructure/hosts`, `/api/infrastructure/types` and
+`/api/tree` respectively. Anything taking a `probe` parameter answers `400` without it, not an
+empty result.
 
 Probe names in the tree are **whitespace-sensitive path strings**:
 `Agents / app-01.example.com / Web Reachable`. Copy them from `/api/tree` rather than
 retyping — a near-miss returns empty, not an error.
 
-## Incidents
+## Incidents — a workflow type, not an endpoint of their own
+
+⛔ **There is no `/api/incidents`.** It answers `404`. The workflow engine replaced the legacy
+incident model: an incident is a *record of type `incident`* moving through a declared state
+machine, and the same endpoints serve every other record type a deployment declares.
+
+**Read the type before you write an instance.** `GET /api/workflows/types/incident` returns the
+nodes, the edges between them and the fields each node shows. On a stock deployment that is
+`open` `investigating` `identified` `monitoring` `mitigating` `resolved`, with `* → resolved`
+reachable from anywhere; the fields are `title` `severity` `assignee` `eta` `summary`
+`services` `postmortem`. **Read it rather than trusting that list** — a deployment can edit its
+own types, and a `to` that is not a node is refused.
 
 ```bash
+K="X-API-Key: $STATUS_API_KEY"
+
+# what types exist, and what this one's state machine looks like
+curl -s -H "$K" "$STATUS_URL/api/workflows/types"
+curl -s -H "$K" "$STATUS_URL/api/workflows/types/incident"
+
 # list
-curl -s -H "X-API-Key: $STATUS_API_KEY" "$STATUS_URL/api/incidents"
+curl -s -H "$K" "$STATUS_URL/api/workflows/incident"
 
-# open
-curl -s -X POST -H "X-API-Key: $STATUS_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"title":"Checkout latency elevated","severity":"minor"}' \
-  "$STATUS_URL/api/incidents"
+# open — fields are whatever the type declares
+curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
+  -d '{"fields":{"title":"Checkout latency elevated","severity":"minor"}}' \
+  "$STATUS_URL/api/workflows/incident"
 
-# comment
-curl -s -X POST -H "X-API-Key: $STATUS_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"content":"Traced to the payments upstream.","type":"comment"}' \
-  "$STATUS_URL/api/incidents/<id>/comments"
+# comment — the field is `text`
+curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
+  -d '{"text":"Traced to the payments upstream."}' \
+  "$STATUS_URL/api/workflows/incident/<id>/comments"
 
-# resolve
-curl -s -X POST -H "X-API-Key: $STATUS_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"summary":"Upstream recovered; p99 back under 400ms."}' \
-  "$STATUS_URL/api/incidents/<id>/resolve"
+# move it along — `to` is a node id from the type, `version` is the instance's current version
+curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
+  -d '{"to":"resolved","version":3,"fields":{"summary":"Upstream recovered; p99 under 400ms."}}' \
+  "$STATUS_URL/api/workflows/incident/<id>/transitions"
+
+# attach the probe that is red, so the record and the board point at each other
+curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
+  -d '{"kind":"probe","id":"<probe-id>"}' \
+  "$STATUS_URL/api/workflows/incident/<id>/references"
 ```
 
-Severities follow the usual status-page vocabulary (`minor`, `major`, …). Prefer opening an
-incident over letting a red sit unexplained — an unexplained red is how people learn to
-ignore red.
+A reference is only accepted by a type that declares it accepts that kind — ask which do with
+`GET /api/workflows/attachable?kind=probe` (the `kind` parameter is **required**; omitting it is
+a `400`).
+
+| Trap | |
+|---|---|
+| `name` is an **i18n map** | `{"en":"Incident","de":"Vorfall"}`. Rendering it directly prints an object. True of type and field labels throughout |
+| `version` is optimistic locking | Send the instance's current `version` on a transition or a field patch. Omit it and you send `0` |
+| An edge's `when` is a **hard gate** | A transition whose condition is false is refused with `when_condition_false`, not let through with a warning. `override: true` is opt-in and separate |
+| Comment field | `text`. `content` or `comment` posts an empty comment and still answers `204` |
+
+Prefer opening a record over letting a red sit unexplained — an unexplained red is how people
+learn to ignore red. Full endpoint list: `references/api-surface.md` → *Workflows*.
 
 ## Writing configuration
 
@@ -236,21 +284,95 @@ The Probe IDE's backend is fully scriptable under `/api/ide/*`:
 | Endpoint | Use |
 |---|---|
 | `GET /api/ide/probes` · `GET /api/ide/list` | What is installed. |
-| `GET /api/ide/probe-source` · `GET /api/ide/probe-definition` | Read a probe's `check.js` / `probe.yml`. |
-| `POST /api/ide/probe-create` | New catalog probe. |
-| `POST /api/ide/probe-save` · `POST /api/ide/probe-definition` | Write `check.js` / `probe.yml`. |
+| `GET /api/ide/probe-source` · `GET /api/ide/probe-definition` | Read a probe's `check.js` / `probe.yml`. Both accept `?name=` or `?id=`, plus `?ref=`. |
+| `POST /api/ide/probe-create` | New catalog probe, authored here rather than imported. |
+| `POST /api/ide/probe-save` · `POST /api/ide/probe-definition` | Write `check.js` / `probe.yml` **at a `ref`**. |
+| `GET /api/ide/probe-versions?id=` | The version bar: `live`, `liveDirty`, `origin`, `releases[]`, `dev[]`. |
+| `POST /api/ide/probe-version-create` · `-release` · `-activate` · `-delete` | The authoring loop below. |
 | `POST /api/ide/test` | Run a script server-side against sample params. |
-| `POST /api/ide/test-on-agent` → `GET /api/ide/test-on-agent/{id}` | Run it **on a real agent** and poll the result. Async: the POST returns an id. `{agent, id}` runs the INSTALLED probe; `{agent, source}` runs an inline script and wins if both are sent. |
+| `POST /api/ide/test-on-agent` → `GET /api/ide/test-on-agent/{id}` | Run it **on a real agent** and poll the result. Async: the POST returns an id. `{agent, id}` runs the INSTALLED probe; `{agent, ref}` runs that version; `{agent, source}` runs an inline script and wins over both. |
 | `GET/POST /api/ide/probe-bindings` | Which hosts a probe is bound to. |
 | `GET/POST /api/ide/probe-svg` | The probe's infographic. |
-| `GET/POST /api/ide/command-*` | The same surface for agent commands. |
+| `GET/POST /api/ide/command-*` | The same surface for agent commands, **including versions** — `command-versions`, `command-version-create`, `-release`, `-activate`, `-delete`. |
+
+### 🚨 A plain save is refused now — probes AND commands are versioned
+
+Every entry has three kinds of version, named by a `ref`: `live` (what agents run),
+`dev/<label>` (a draft) and `rel/<version>` (an immutable release). A write with no `ref`
+means `live`, and that is the refused case more often than not:
+
+| You post | You get |
+|---|---|
+| `{id, source}` on something that came from a library | `409 <id> runs <library> <version> — edits go into a dev version` |
+| `{id, source, ref:"rel/1.0.0"}` | `409 Release versions are immutable — branch a dev version from it` |
+| `{id, source, ref:"dev/my-fix"}` | `200` — and no agent is affected until you release and activate |
+
+Nothing ships in the server jar any more, so on a typical board **almost every installed entry
+is library-sourced** and the bare save is the one that fails. The loop:
+
+```bash
+K="X-API-Key: $STATUS_API_KEY"; ID=disk-space
+
+# 0. where does it come from, and what versions exist?
+curl -s -H "$K" "$STATUS_URL/api/ide/probe-versions?id=$ID"
+
+# 1. branch a draft off what is live
+curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
+  -d "{\"id\":\"$ID\",\"label\":\"my-fix\",\"basedOn\":\"live\"}" \
+  "$STATUS_URL/api/ide/probe-version-create"
+
+# 2. edit the draft — ref in the body for a write, ?ref= for a read
+curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
+  -d "{\"id\":\"$ID\",\"ref\":\"dev/my-fix\",\"source\":\"function check(ctx){…}\"}" \
+  "$STATUS_URL/api/ide/probe-save"
+
+# 3. run THAT draft on a real agent before it goes anywhere near live
+curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
+  -d "{\"agent\":\"host-01\",\"id\":\"$ID\",\"ref\":\"dev/my-fix\"}" \
+  "$STATUS_URL/api/ide/test-on-agent"
+
+# 4. release it, and activate in the same call (STATUS_ADMIN only)
+curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
+  -d "{\"id\":\"$ID\",\"ref\":\"dev/my-fix\",\"version\":\"1.1.0\",\"note\":\"why\",\"activate\":true}" \
+  "$STATUS_URL/api/ide/probe-version-release"
+```
+
+**Rollback is the same verb as activate.** `POST /api/ide/probe-version-activate`
+`{id, version}` with an older release's version, and `discardLiveEdits: true` if the live copy
+was edited in place. Swap `probe-` for `command-` and every step is identical.
+
+⛔ **`POST /api/ide/toggle-dev` and `POST /api/ide/probe-dev` answer `410 Gone`** for both
+kinds. `dev: true` in a manifest was the whole dev/live split before the version store; the
+410's body names that kind's own version endpoints.
+
+### Where probes and commands come from: libraries
+
+⛔ **`POST /api/catalog/install/{id}` and `POST /api/catalog/update/{id}` answer `410 Gone`.**
+There is no built-in catalog. Both kinds are imported from a git **library**:
+
+```bash
+curl -s -H "$K" "$STATUS_URL/api/libraries"                      # what is configured
+curl -s -H "$K" "$STATUS_URL/api/libraries/<lib>/probes"         # what it offers
+curl -s -X POST -H "$K" "$STATUS_URL/api/libraries/<lib>/probes/<id>/import"
+curl -s -X POST -H "$K" "$STATUS_URL/api/libraries/<lib>/commands/<id>/import"
+```
+
+⚠️ **The catalog key is `(kind, id)`** — a probe and a command may share an id. Endpoints that
+take a bare id (`/api/catalog/uninstall/{id}` and its `/impact`) take `?kind=probe|command`;
+with both kinds installed and no `kind`, they refuse with a `409` naming both.
+
+⚠️ **`builtinIds`, `availableProbes` and `availableCommands` in `GET /api/catalog` are
+permanently empty.** They are kept only so an older client still decodes. Anything that decided
+"Built-In" from `builtinIds` shows nothing at all now, with no error — read `liveLibrary` /
+`liveSource` on the entry (or `origin` from the versions call) and say "Yours" when there is
+none. Details: `references/api-surface.md`.
 
 To change what a probe **displays** rather than what it checks, edit the `layout:` block in
-its definition: `GET /api/ide/probe-definition?id=<probe>` → edit → `POST` it back. The widget
-vocabulary and each widget's fields are in the `status-server-ops` skill
+its definition: `GET /api/ide/probe-definition?id=<probe>` → edit → `POST` it back **at a dev
+ref**. The widget vocabulary and each widget's fields are in the `status-server-ops` skill
 (`references/widgets.md`).
 
-**Always `test-on-agent` before `probe-save`.** A script that passes `test` server-side can
+**Always `test-on-agent` before releasing.** A script that passes `test` server-side can
 still fail on an agent — the server has no JS sandbox and silently degrades unsandboxed
 probes to a plain HTTP check (trap 4 in `status-server-ops`).
 
@@ -260,6 +382,20 @@ probes to a plain HTTP check (trap 4 in `status-server-ops`).
 bureaucracy: `POST /api/ide/probe-save` writes `check.js` into the catalog, and **the agents
 on every host then execute it**. An API key that can reach these endpoints can run arbitrary
 code on every machine the board monitors.
+
+One tier tighter, **`STATUS_ADMIN` alone**, for the four verbs where that execution actually
+happens or history is destroyed:
+
+| Verb | Why it is tighter |
+|---|---|
+| `probe-version-release` / `command-version-release` | With `activate: true` it ships code to every agent in one call |
+| `probe-version-activate` / `command-version-activate` | The moment a command is activated it can run with `ctx.shell` on a production host |
+| `POST /api/catalog/uninstall/{id}` | Takes the entry's whole version history with it |
+| `POST` / `PATCH` / `DELETE /api/libraries/**` | Adding a library points your hosts at someone else's repository |
+
+⚠️ **Write access to a library repository is write access to every monitored host**, because
+`ctx.shell` is live on an agent unless that agent runs with `AGENT_READONLY`. The perimeter is
+the repo, not the endpoint — protect its branches accordingly.
 
 | Practice | Why |
 |---|---|
@@ -290,6 +426,18 @@ code, the Dockerfile or compose.
 
 Credentials and probe
 history live in their own databases and are not usually shipped, so those survive.
+
+**A library changes this for probe and command content.** An imported entry's source of truth is
+the git repository, and a library with `installAll` re-imports what is missing after each
+successful refresh — so a probe that came from a library comes back on its own after a deploy
+wipes the probe directory, while one authored only in the IDE does not. (An entry deliberately
+uninstalled is on the library's `excluded` list and is *not* re-imported; that is what makes
+uninstall stick.) That is the strongest argument for putting a probe you care about in a library
+rather than leaving it live-edited.
+
+⚠️ The version store is `.versions/` **inside each entry's directory**, so a `--delete` sync of
+the probe folder takes release and draft history with it. The library can restore the entry; it
+cannot restore your local releases.
 
 ## Config IS writable over the API — but the write is lossy
 

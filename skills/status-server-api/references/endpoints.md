@@ -12,6 +12,11 @@
 
 > All `/api/**` endpoints require authentication — API key (`X-API-Key` header), Keycloak session, or JWT bearer token.
 
+> ⚠️ **And at least one Status role.** An authenticated account with no role gets `403` on every
+> `/api/**` path except `GET /api/user/profile`, which the waiting screen polls until an admin
+> grants one. Anonymous gets `401`. So "Auth: API Key/JWT" in the tables below means *a key whose
+> owner has a role*; a `403` on a plain read is a missing role, not a missing endpoint.
+
 ---
 
 ## Health
@@ -29,7 +34,7 @@
 | GET | `/api/global` | API Key/JWT | Global settings (service name, theme) |
 | GET | `/api/events` | API Key/JWT | Event log (query: `hours`) |
 | GET | `/api/events/stream` | API Key/JWT | SSE real-time event stream |
-| GET | `/api/untracked-issues` | API Key/JWT | Errors not linked to an incident |
+| GET | `/api/untracked-issues` | API Key/JWT | Errors not linked to a workflow record |
 | GET | `/api/auth-config` | Public | Auth provider configuration |
 
 ## Probes
@@ -79,11 +84,30 @@
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/catalog` | API Key/JWT | Full catalog (probes + commands) |
-| GET | `/api/catalog/sync` | Public | Catalog hash for agent sync polling |
-| POST | `/api/catalog/install/{id}` | API Key/JWT | Install catalog entry |
-| POST | `/api/catalog/uninstall/{id}` | API Key/JWT | Uninstall catalog entry |
-| POST | `/api/catalog/update/{id}` | API Key/JWT | Update installed entry |
+| GET | `/api/catalog` | API Key/JWT | Full catalog (probes + commands). `builtinIds`, `availableProbes` and `availableCommands` are **always empty** — read `liveLibrary`/`liveSource` for provenance |
+| GET | `/api/catalog/sync` | **`STATUS_ADMIN`/`INFRA_ADMIN`** | Installed entries + hash. It used to be public "for agents"; agents get their scripts in the heartbeat and never called it |
+| POST | `/api/catalog/install/{id}` | — | **410 Gone** — use `/api/libraries/{name}/{probes\|commands}/{id}/import` |
+| POST | `/api/catalog/update/{id}` | — | **410 Gone** — use `/api/libraries/{name}/{probes\|commands}/{id}/update` |
+| GET | `/api/catalog/uninstall/{id}/impact` | `STATUS_ADMIN` | What uninstalling loses. `?kind=command` for a command |
+| POST | `/api/catalog/uninstall/{id}` | `STATUS_ADMIN` | Uninstall. `?kind=` when a probe and a command share the id — with both installed and no `kind`, `409` |
+
+## Probe and command libraries
+
+Where both kinds come from since the jar stopped shipping a catalog. All `STATUS_ADMIN` except
+the reads, which take `STATUS_ADMIN` or `INFRA_ADMIN`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/libraries` | Configured libraries, their commits and counts |
+| GET | `/api/libraries/{name}/probes` · `/commands` | What it offers |
+| GET | `/api/libraries/{name}/probes/{id}` · `/commands/{id}` | One entry |
+| GET | `/api/libraries/{name}/impact` | What turning it off would strip |
+| POST | `/api/libraries` | Add one |
+| PATCH | `/api/libraries/{name}` | `{enabled, autoUpdate, autoApplyProbeUpdates, autoApplyCommandUpdates, ref, credential}` |
+| DELETE | `/api/libraries/{name}` | Remove it, and its entries' presets and wiring |
+| POST | `/api/libraries/{name}/refresh` | Re-fetch now |
+| POST | `/api/libraries/{name}/probes/{id}/import` · `/update` | Replaces `catalog/install` · `catalog/update` |
+| POST | `/api/libraries/{name}/commands/{id}/import` · `/update` | Same for commands — the kind is in the path |
 
 ## Credentials Store
 
@@ -102,17 +126,32 @@
 |--------|------|------|-------------|
 | GET | `/api/ide/list` | API Key/JWT | List all scripts |
 | GET | `/api/ide/probes` | API Key/JWT | List probes for IDE |
-| GET | `/api/ide/probe-source?name=<id>` | API Key/JWT | Get probe JS source. **`name=`, not `id=`** — the wrong param 302s |
-| GET | `/api/ide/probe-definition` | API Key/JWT | Get probe YAML definition |
-| POST | `/api/ide/probe-definition` | API Key/JWT | Save probe YAML |
-| POST | `/api/ide/probe-save` | API Key/JWT | Save probe JS source |
+| GET | `/api/ide/probe-source?name=<id>` | API Key/JWT | Get probe JS source. `?name=` and `?id=` are both accepted; a missing one is a 400 naming both. `?ref=` reads a version |
+| GET | `/api/ide/probe-definition` | API Key/JWT | Get probe YAML definition (`?ref=`) |
+| POST | `/api/ide/probe-definition` | API Key/JWT | Save probe YAML at `ref` |
+| POST | `/api/ide/probe-save` | API Key/JWT | Save probe JS source at `ref` |
 | POST | `/api/ide/probe-create` | API Key/JWT | Create new probe |
-| GET | `/api/ide/probe-svg` | API Key/JWT | Get probe SVG template |
-| POST | `/api/ide/probe-svg` | API Key/JWT | Save probe SVG template |
-| GET | `/api/ide/probe-bindings` | API Key/JWT | Get probe SVG bindings |
-| POST | `/api/ide/probe-bindings` | API Key/JWT | Save probe SVG bindings |
-| POST | `/api/ide/toggle-dev` | API Key/JWT | Toggle dev mode on probe |
-| POST | `/api/ide/probe-dev` | API Key/JWT | Set probe dev flag |
+| GET | `/api/ide/probe-svg` | API Key/JWT | Get probe SVG template (`?ref=`) |
+| POST | `/api/ide/probe-svg` | API Key/JWT | Save probe SVG template at `ref` |
+| GET | `/api/ide/probe-bindings` | API Key/JWT | Get probe SVG bindings (`?ref=`) |
+| POST | `/api/ide/probe-bindings` | API Key/JWT | Save probe SVG bindings at `ref` |
+| POST | `/api/ide/toggle-dev` | — | **410 Gone** for probes and commands — the version store replaced `dev: true` |
+| POST | `/api/ide/probe-dev` | — | **410 Gone** — alias of the above |
+
+### Versions
+
+Every write above takes `ref`: `live` (default), `dev/<label>` or `rel/<version>`. A `live`
+write on a library-sourced entry is `409`, and `rel/*` is `409` (immutable). Swap `probe-` for
+`command-` for the command side of each row.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/ide/probe-versions?id=` | API Key/JWT | `{id, kind, live, liveDirty, origin, releases[], dev[]}` |
+| GET | `/api/ide/command-versions?id=` | API Key/JWT | |
+| POST | `/api/ide/probe-version-create` | API Key/JWT | `{id, label, basedOn}` → `{ref:"dev/<label>"}` |
+| POST | `/api/ide/probe-version-delete` | API Key/JWT | `{id, ref:"dev/<label>"}` — drafts only |
+| POST | `/api/ide/probe-version-release` | **`STATUS_ADMIN`** | `{id, ref, version, note, activate}` |
+| POST | `/api/ide/probe-version-activate` | **`STATUS_ADMIN`** | `{id, version, discardLiveEdits}` — also how you roll back |
 | GET | `/api/ide/script/{name}` | API Key/JWT | Get script source |
 | POST | `/api/ide/save` | API Key/JWT | Save script |
 | POST | `/api/ide/test` | API Key/JWT | Test script locally |
@@ -196,11 +235,18 @@
 | DELETE | `/api/admin/retention-presets/{name}` | API Key/JWT | Delete preset |
 | GET | `/api/admin/storage` | API Key/JWT | Storage statistics |
 | POST | `/api/admin/storage/delete` | API Key/JWT | Delete storage data |
-| GET | `/api/admin/notifications` | Session | Notification config |
-| POST | `/api/admin/notifications/save` | Session | Save notifications |
-| POST | `/api/admin/notifications/toggle` | Session | Toggle notification channel |
-| POST | `/api/admin/notifications/reload` | Session | Reload notification config |
-| POST | `/api/admin/notifications/telegram/set-webhook` | Session | Set Telegram webhook |
+| GET | `/api/admin/notifications` | `STATUS_ADMIN`/`INFRA_ADMIN` | Notification config, secrets masked |
+| POST | `/api/admin/notifications/{section}` | `STATUS_ADMIN`/`INFRA_ADMIN` | Save one section (`telegram`, `email`, …) |
+| POST | `/api/admin/notifications/{section}/toggle` | `STATUS_ADMIN`/`INFRA_ADMIN` | Enable or disable that channel |
+| POST | `/api/admin/notifications/{section}/test` | `STATUS_ADMIN`/`INFRA_ADMIN` | Send a test through it |
+
+⚠️ `/api/admin/notifications/save`, `/toggle`, `/reload` and `/telegram/set-webhook` **do not
+exist** — earlier revisions of this file listed them. The section is a path variable.
+
+⚠️ Everything under `/api/admin/**` needs `STATUS_ADMIN` or `INFRA_ADMIN`, and `/api/admin/users/**`
+needs `STATUS_ADMIN`, as a prefix rule in the security chain rather than a per-handler check.
+"Session" in older rows here meant "any authenticated caller", which is no longer true of any of
+them.
 
 ## Admin (Users & Agents, Session-based)
 

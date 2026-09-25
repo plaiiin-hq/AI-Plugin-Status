@@ -585,51 +585,64 @@ legacy no-agent-result path.
 
 ## Install and sync — how a plugin reaches an agent
 
-Status keeps the catalog in three layers (`CatalogService.java:20-29`):
+Status keeps a plugin in three places, and **none of them is the jar any more**:
 
 | Layer | Location | Mutable |
 |---|---|---|
-| Built-in | `classpath:catalog/probes/*/probe.yml` | no — shipped inside the jar |
-| Installed | `{config-path}/probes/<id>/` | yes — agents and the Probe IDE read this layer |
-| Comparison | `getAvailableUpdates()` | compares the `updated` strings |
+| Library (source of truth) | a git repository, cloned to `{config-path}/library-cache/<name>/` | only in the repo |
+| Live | `{config-path}/probes/<id>/` (or `commands/<id>/`) | yes — this is the layer agents and the Probe IDE read |
+| Versions | `{config-path}/probes/<id>/.versions/{rel,dev}/` + `versions.yml` | releases are immutable; drafts are yours |
+
+⛔ **`classpath:catalog/probes/` no longer exists, and neither does
+`autoInstallBuiltins()`.** The jar ships zero probes and zero commands; `resources/catalog/`
+holds only `former-builtins.txt`, `former-builtin-commands.txt` and log sources. The old
+built-in → installed copy at startup is gone, and with it "reset to builtin".
 
 Sequence:
 
-1. `autoInstallBuiltins()` (`CatalogService.java:89-106`) runs at startup and installs
-   every built-in that has no installed copy.
-2. `install()` (`CatalogService.java:136-193`) **re-serialises** the parsed entry through
-   `toManifestMap()` (`CatalogService.java:745-802`) and writes the sidecar files. This is
-   not a file copy — see [F2](#fails-silently--symptom-cause-fix) for what is lost.
-3. Change detection runs on two tracks: a `WatchService` with a 500 ms debounce
-   (`CatalogService.java:636-667`), plus a 30 s modification-time poll
-   (`CatalogService.java:601-614`) because kqueue on macOS misses events.
+1. An entry enters the live layer by **import from a library** (`POST
+   /api/libraries/{name}/{probes|commands}/{id}/import`), which **copies its files verbatim** and
+   records a release plus an `origin` in `versions.yml`. A library with `installAll` re-imports
+   anything missing after each successful refresh.
+2. `install()`'s re-serialisation through `toManifestMap()` is no longer on that path — see
+   [F2](#fails-silently--symptom-cause-fix), which this fixed.
+3. Change detection runs on two tracks: a `WatchService` with a 500 ms debounce, plus a 30 s
+   modification-time poll because kqueue on macOS misses events. `.versions/` is excluded from
+   recursive registration, so a draft edit does not look like a live change.
 4. The agent receives scripts inline in its heartbeat's probe assignments
-   (`AgentController.buildProbeAssignments`, `:684-753`), which attach `scriptSource`,
-   `actionScripts` and `shell` per assignment.
+   (`AgentController.buildProbeAssignments`), which attach `scriptSource`,
+   `actionScripts` and `shell` per assignment. A command's `run.js` is attached at dispatch.
 
 Timing rule: if a plugin file changes, then an agent sees it after the server's detection
 lag (500 ms to 30 s) plus one heartbeat interval (`agent.heartbeat-interval`, default
-**30 s**, `HeartbeatService.java:89`) — up to roughly 60 s.
+**30 s**) — up to roughly 60 s.
 `writing-probes.md:740` claims 3 seconds; that figure is stale.
 
-`/api/catalog/sync` still exists (`CatalogController.java:61-72`) and returns
-`getAllInstalled()`, which excludes `dev: true` entries. **The agent never calls it** — a
+`/api/catalog/sync` still exists and returns `getAllInstalled()`. **The agent never calls it** — a
 grep of Status-Agent finds only `register`, `heartbeat`, `command-*`, `log-stream`,
-`probe-results` and `probe-stream`. `/api/catalog/sync` is also on the public filter chain
-(`SecurityConfig.java:58`), so every installed probe's script source is readable without
-authentication.
+`probe-results` and `probe-stream`. It used to be on the **public** filter chain, serving every
+installed probe's script source (383 KB on the live board) to anyone; it is now
+`STATUS_ADMIN`/`INFRA_ADMIN`, verified `401` anonymous.
 
 ### Editing an installed plugin
 
 | Action | Endpoint | Preserves comments and key order |
 |---|---|---|
-| Save `check.js` | `POST /api/ide/probe-save` (`ScriptPlaygroundController.java:379`) | not applicable |
-| Save `probe.yml` | `POST /api/ide/probe-definition` (`ScriptPlaygroundController.java:413`) | **yes** — writes the string verbatim |
-| Toggle `dev` | `POST /api/ide/toggle-dev` (`ScriptPlaygroundController.java:547`) | **no** — round-trips through a generic Map and strips every comment |
-| Install / update | `POST /api/catalog/install/{id}` / `update/{id}` | **no** — see [F2](#fails-silently--symptom-cause-fix) |
+| Save `check.js` | `POST /api/ide/probe-save` | not applicable |
+| Save `probe.yml` | `POST /api/ide/probe-definition` | **yes** — writes the string verbatim |
+| Import / update from a library | `POST /api/libraries/{name}/probes/{id}/import` · `/update` | **yes** — a file copy, not a re-serialisation |
+| Toggle `dev` | `POST /api/ide/toggle-dev` | ⛔ **410 Gone** — `dev: true` was replaced by the version store, for both kinds |
+| Install / update from the jar | `POST /api/catalog/install/{id}` · `update/{id}` | ⛔ **410 Gone** — there is nothing in the jar to install |
+
+⚠️ **Every write above takes a `ref`, and `live` is refused on a library-sourced entry.** A bare
+`probe-save` answers `409 <id> runs <library> <version> — edits go into a dev version`, and
+`ref: rel/*` answers `409 Release versions are immutable`. Branch a draft with
+`POST /api/ide/probe-version-create` `{id, label, basedOn:"live"}`, write at `ref: dev/<label>`,
+then `probe-version-release` (`STATUS_ADMIN`). `command-*` behaves identically.
 
 There is no Probe IDE endpoint for `action-*.js`, `detect.js` or `icon.svg`. Those files
-must be placed on the filesystem under `{config-path}/probes/<id>/`; they survive because
+must be placed on the filesystem under `{config-path}/probes/<id>/` — or, better, in the library,
+which is the only copy a redeploy cannot lose. They are picked up because
 `loadFileEntries` rescans the directory on every reload.
 
 ---
@@ -646,13 +659,13 @@ Each entry below fails without an error, an exception or a log line.
 | **Cause** | `probe.yml` has no `id:` key. `parseManifest` returns null (`CatalogService.java:514-515`) and both loaders test `if (entry != null)` before storing, so the plugin is dropped without a log line. A duplicate `id:` in two directories has the same shape of failure — `target.put(entry.id(), …)` (`CatalogService.java:419`) means the last directory scanned silently wins. |
 | **Fix** | Add `id:` to `probe.yml`. Make `id:` unique, and make it equal to the directory name — because `install()` writes to `probes/{id}/`, a directory named `foo/` containing `id: bar` produces two directories for one plugin. |
 
-### F2 — category and credential_type vanish from the installed copy
+### F2 — ✅ FIXED: `category` and comments no longer vanish from the live copy
 
 | | |
 |---|---|
-| **Symptom** | Every plugin appears under "other" on the catalog screen, the credential picker is unfiltered, and hand-written comments in `probe.yml` are gone. |
-| **Cause** | `toManifestMap` (`CatalogService.java:745-802`) writes `id`, `name`, `description`, `updated`, `icon`, `dev`, `shell`, `changelog`, `params`, `output`, `layout` and `plate`. `toManifestMap` does not write `category:`, and does not write `credential_type` inside a param (`CatalogService.java:763-774`). `autoInstallBuiltins()` runs `install()` on first startup, so the installed copy — the copy agents and admin screens read — has already lost both fields, plus all comments and the original key order. `plaiiin-mirror/probe.yml` carries roughly 40 lines of incident notes that do not survive one install. |
-| **Fix** | Add `category` and `credential_type` to `toManifestMap`, or stop round-tripping on install. Until then: edit installed manifests through `POST /api/ide/probe-definition`, which writes the string verbatim (`ScriptPlaygroundController.java:413-430`), and avoid `POST /api/ide/toggle-dev`, which strips comments (`ScriptPlaygroundController.java:550-569`). |
+| **Was** | Every plugin appeared under "other", the credential picker was unfiltered, and hand-written comments in `probe.yml` were gone. `toManifestMap` never wrote `category:` or a param's `credential_type`, and `autoInstallBuiltins()` ran that re-serialisation over every built-in on first startup — so the copy agents and admin screens read had already lost both, plus all comments and the original key order. `plaiiin-mirror/probe.yml` carries roughly 40 lines of incident notes that did not survive one install. |
+| **Now** | ⛔ Both halves of the cause are gone. Nothing ships in the jar, so `autoInstallBuiltins()` no longer exists; and a library import (and a release activation) **copies the files**, so the live manifest is byte-identical to the library's. Measured on a live board: `plaiiin-mirror` has all **41** of its comment lines and its `category:`, and so does every other entry checked. |
+| **Still true** | `toManifestMap` survives as `manifestMeaning()`, used to compare a library copy with a live copy *by meaning* rather than byte for byte — which is exactly why an installed manifest's comments no longer have to match anything. If you hand-write a manifest, write it in the library. |
 
 ### F3 — credential_type never filters the picker, and default never pre-fills
 

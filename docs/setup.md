@@ -32,12 +32,18 @@ Keys inherit the roles of the user that minted them. **This is the decision that
 
 | Key kind | Roles | Can do | Use for |
 |---|---|---|---|
-| **Read** | none beyond authenticated | `/api/tree`, `/api/status`, `/api/probes/history`, incidents | Dashboards, bots, ambient Claude sessions, CI checks |
-| **Admin** | `STATUS_ADMIN` or `INFRA_ADMIN` | Everything above **plus `/api/ide/**`** | Deliberate probe-authoring sessions only |
+| **Read** | `VIEWER` + `HISTORY_USER` | `/api/tree`, `/api/status`, `/api/probes/history`, workflow records | Dashboards, bots, ambient Claude sessions, CI checks |
+| **Admin** | `STATUS_ADMIN` or `INFRA_ADMIN` | Everything above **plus `/api/ide/**`** | Deliberate probe- and command-authoring sessions only |
+| **Release** | `STATUS_ADMIN` | Everything above **plus** releasing/activating a version, uninstalling an entry, adding a library | The moment code actually ships to your hosts |
+
+⚠️ **"Authenticated" is not a role.** An account with no Status role gets `403` on every
+`/api/**` path except `GET /api/user/profile`. A key needs at least one role to read anything,
+so a read key is `VIEWER` (plus `HISTORY_USER` if it should see history), not "no roles".
 
 `POST /api/ide/probe-save` writes `check.js` into the probe catalog, and the agents on every
 monitored host then execute it. An admin key is therefore code execution on your whole
-estate — not just read access to a board.
+estate — not just read access to a board. The same is true of a **library**: adding one points
+every agent at that repository's scripts, which is why it takes `STATUS_ADMIN`.
 
 Default to a **read key**. Reach for an admin key when you are actually authoring, and
 rotate it afterwards.
@@ -52,9 +58,13 @@ rotate it afterwards.
 curl -s -H "X-API-Key: $STATUS_API_KEY" "$STATUS_URL/api/status" | head -c 400
 ```
 
-A **302 to `/app/login`** does not mean a bad key — it usually means the path is outside
-`/api/**`, which is the only prefix the API-key filter is registered on. Check the path
-first.
+| Answer | Means |
+|---|---|
+| `200` | Working |
+| `401 {"error":"Invalid API key"}` | Bad or revoked key |
+| `401` with no body | Not authenticated at all — the header did not arrive |
+| **`403`** | The key is fine; **its owner has no Status role**. Ask an admin to grant one. `GET /api/user/profile` is the one path that still answers |
+| **`302 → /app/login`** | Not a bad key. The path is outside `/api/**`, the only prefix the API-key filter is registered on. Check the path first |
 
 ## 5. MCP server — not currently distributed
 

@@ -96,13 +96,23 @@ var token = typeof c === 'string' ? c : (c && c.token)
 building the assignment, so a working credential shows only its `create` entry. An empty log is
 not evidence the credential failed — check the probe's message instead.
 
-## Agent Delivery
+## Agent delivery — ⚠️ corrected
 
-1. Server includes credential name in probe assignments during heartbeat
-2. Agent fetches credential via signed request: `GET /api/agents/{name}/credentials/{credentialName}`
-3. Server verifies Ed25519 signature, decrypts, returns full credential
-4. Agent caches in memory (5-min TTL), never writes to disk
-5. Credential injected as `ctx.params.credentials` in probe sandbox
+**Substitution is entirely server-side.** The earlier description here — the agent fetching
+`GET /api/agents/{name}/credentials/{credentialName}` over a signed request, caching it for five
+minutes and receiving it as a `ctx.params.credentials` object — describes a path that **does not
+exist**. That endpoint is not in the server (it answers `404`), and no
+`ctx.params.credentials` object is ever constructed.
+
+What actually happens:
+
+1. A probe's `params` names a credential as `credential:<name>`.
+2. The server resolves and decrypts it **while building the probe assignment** for the heartbeat.
+3. The agent receives the resolved value in that param, like any other param. There is no second
+   call and no separate cache.
+
+The practical consequence: a `check.js` reads `ctx.params.<paramName>` — the plain value — not
+`ctx.params.credentials.token`. See `probe-plugin-format.md`, which flags the same two documents.
 
 ## Admin API
 

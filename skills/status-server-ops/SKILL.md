@@ -1,6 +1,6 @@
 ---
 name: status-server-ops
-description: Use when setting up, modelling or operating a Plaiiin Status server — declaring hosts/projects/services, using SERVICE TYPES to auto-generate probes, writing custom probes and actions, and designing what a probe SHOWS: dashboard layout, tiles, widgets (gauge, chart, bar, value) and custom SVG infographics. Also for project tabs, dependencies, sites/floor-plans, thresholds, agent policies and alerting — and when a probe reads green, empty or absent and you need to know whether it is actually running. Covers reading and writing infrastructure.yml over the API, its fields one by one, finding and removing abandoned history data, the check.js sandbox, the Probe IDE, and seven wiring mistakes that fail as SILENCE rather than as errors. Also covers the credentials store — how a probe authenticates to what it monitors. Your own API key lives in ~/.plaiiin/status-server/env; read that before asking anyone for one.
+description: Use when setting up, modelling or operating a Plaiiin Status server — declaring hosts/projects/services, using SERVICE TYPES to auto-generate probes, writing custom probes, commands and actions, and designing what a probe SHOWS: dashboard layout, tiles, widgets (gauge, chart, bar, value) and custom SVG infographics. Also for probe and command LIBRARIES (the git repositories both kinds now come from, since nothing ships in the jar), their versions, releases and rollback, project tabs, dependencies, sites/floor-plans, thresholds, agent policies and alerting — and when a probe reads green, empty or absent and you need to know whether it is actually running. Covers reading and writing infrastructure.yml over the API, its fields one by one, finding and removing abandoned history data, the check.js sandbox, the Probe IDE, and seven wiring mistakes that fail as SILENCE rather than as errors. Also covers the credentials store — how a probe authenticates to what it monitors. Your own API key lives in ~/.plaiiin/status-server/env; read that before asking anyone for one.
 ---
 
 # Operating a Plaiiin Status server
@@ -59,8 +59,10 @@ account you are signed in as when you click *New key* decides what the key can d
 
 | Signed in as | Key can |
 |---|---|
-| an ordinary user | read state, read history, work with incidents |
-| `STATUS_ADMIN` / `INFRA_ADMIN` | all of the above **plus** `/api/ide/**` — writing probe scripts that execute on every monitored host, and writing config |
+| an account with **no** Status role | `GET /api/user/profile` and nothing else — every other `/api/**` path is `403` |
+| an ordinary user (any one role) | read state, read history, work with workflow records |
+| `STATUS_ADMIN` / `INFRA_ADMIN` | all of the above **plus** `/api/ide/**` — writing probe and command scripts that execute on every monitored host, and writing config |
+| `STATUS_ADMIN` alone | releasing and activating a version, uninstalling an entry, adding or removing a library |
 
 Prefer a key minted by a non-admin account for anything ambient (dashboards, bots, a
 long-running assistant session). Reach for an admin key only while authoring, and revoke it
@@ -127,6 +129,7 @@ Read these on demand — they are the authoritative detail, not summaries.
 | `references/writing-probes.md` | The full probe-authoring guide: `probe.yml`, `check.js`, the sandbox APIs, `streamValues`, templated paths, actions, tree-attached logs, `scriptResult`, thresholds, worked examples. |
 | `references/widgets.md` | **Which widgets render where** — the probe card knows 10, the topology view 33, only 5 overlap. Fields per widget, tile spans. |
 | `references/probe-sandbox.md` | The sandbox contract and the full param-type table. |
+| `references/libraries.md` | 🚨 **Where probes and commands come from** — the git libraries both kinds are imported from, their versions, updates, dormancy, uninstall refusals, and why `builtinIds` is empty. Read before touching the catalog. |
 | `references/probes.md` | Probe kinds, local vs remote, how binding works. |
 | `references/credentials-store.md` | **Probe secrets** — the six credential types, encryption, agent delivery, admin API, audit log. |
 | `references/notifications.md` | **Alerting** — Telegram bot, webhooks, routing. Read before assuming a red reaches anyone. |
@@ -491,12 +494,19 @@ cannot draw — use an **infographic**: `template.svg` with `id`s on the live pa
 registry, live over `POST /api/ide/probe-svg`. Only 1 of ~45 shipped probes uses this, so it
 is where the headroom is. Full vocabulary: `references/infographics.md`.
 
-## The probe catalog
+## The probe and command catalog
 
 Each catalog probe is a directory holding `probe.yml` (metadata, typed params, declared
-outputs, dashboard layout) and `check.js` (the check). ~40 ship in the box: HTTP/TCP/SSL,
-Docker, host metrics, databases, CI, and a long tail of third-party `*-status` pages. List
-what is installed with `GET /api/ide/probes`.
+outputs, dashboard layout) and `check.js` (the check). A command is the same shape —
+`command.yml` + `run.js`, same parser, same sandbox. List what is installed with
+`GET /api/ide/probes` and `GET /api/ide/commands`.
+
+> 🚨 **Nothing ships in the server jar.** Both kinds come from a **library** — a git repository
+> the server clones and imports from. `POST /api/catalog/install/{id}` and
+> `/api/catalog/update/{id}` answer **`410 Gone`**, and `builtinIds` / `availableProbes` /
+> `availableCommands` in `GET /api/catalog` are permanently empty. Both kinds are also
+> **versioned**, so a bare `probe-save` on a library-sourced entry is refused with a `409`.
+> **Read `references/libraries.md` before importing, editing or uninstalling anything.**
 
 **Param types:** `url` · `hostname` · `port` · `string` · `text` · `int` · `number` ·
 `boolean` · `select` · `duration` · `percent` · `bytes` · `timestamp` · `color` · `location` ·
@@ -764,7 +774,7 @@ curl -s -H "$K" "$STATUS_URL/api/events"
 # 5. one probe's series, to confirm it is producing values
 curl -s -H "$K" "$STATUS_URL/api/probes/history?probe=<name>&resolution=5s"
 
-# 6. failing things no incident covers yet — the triage queue
+# 6. failing things no workflow record covers yet — the triage queue
 curl -s -H "$K" "$STATUS_URL/api/untracked-issues"
 ```
 
@@ -773,5 +783,6 @@ never executed once — that is trap 1, and the absence of a history entry is ho
 
 ## See also
 
-`status-server-api` — driving a live board: read surfaces, probe history, incidents, and the
-role gate on `/api/ide/**`.
+`status-server-api` — driving a live board: read surfaces, probe history, incidents (which are
+records of workflow type `incident`, not an `/api/incidents` endpoint), the `ref` rules that make
+a plain `probe-save` refuse, and the role gate on `/api/ide/**`.

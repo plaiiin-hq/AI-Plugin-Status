@@ -488,7 +488,9 @@ An infographic replaces the tile grid entirely for a probe. It is a hand-authore
 | `<probe>/infographic/template-dark.svg` | Dark-theme SVG → `svgTemplateDark`; null = use light | yes |
 | `<probe>/infographic/bindings.yml` | Value → element bindings → `bindingsYaml` | yes |
 
-Discovery is at `CatalogService.java:375-392` (classpath probes) and `CatalogService.java:476-486` (filesystem probes); `CatalogService.java:164-174` writes the trio back out when materialising a builtin. `CatalogEntry.java:75` defines `hasInfographic()` as `svgTemplate != null && !svgTemplate.isBlank()` — the bindings file is not part of the test, so a template with no bindings still counts and renders as a static, never-updating picture.
+Discovery is filesystem-only now — there is no classpath catalog left to scan, since nothing
+ships in the jar; the trio arrives with a library import, which copies the files. `CatalogEntry`
+defines `hasInfographic()` as `svgTemplate != null && !svgTemplate.isBlank()` — the bindings file is not part of the test, so a template with no bindings still counts and renders as a static, never-updating picture.
 
 **Measured: 1 of 44 catalog probe types ships an infographic** — `http-endpoint`, which has `template.svg` and `bindings.yml` but no dark variant. 9 of 44 ship an `icon.svg`, which is a *different* asset (the probe's icon, not an infographic). On the live board 24 nodes report `hasInfographic` (12 in `projects`, 12 in `hosts` — the same probes surfaced in both trees).
 

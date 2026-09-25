@@ -34,7 +34,8 @@ services:
     vars: { port: 5432 }
 ```
 
-`postgres.yml` in the built-in catalog declares:
+`postgres.yml` in the **service-type** catalog declares (this one genuinely does ship in the jar —
+service types are not probes, and unlike the probe catalog they were never moved out):
 
 ```yaml
 name: PostgreSQL
@@ -77,6 +78,30 @@ Deployments built before **2026-08-27** shipped 22 types of which **7 never load
 `google-workspace-status`) — including `postgres`, so the obvious first thing to try silently
 did nothing. If your server reports 15, you are on such a build: upgrade, or write the probes
 by hand until you do.
+
+### 🚨 A type's `script:` names a catalog probe — which you now have to import
+
+Several built-in types generate a probe with `script: <probe-id>`, and those probe ids do **not**
+ship in the jar any more. Across the 22 types the ids used are:
+
+`dockerhub` · `github-actions` · `google-workspace` · `grafana-alerts` · `jenkins` ·
+`statuspage` · `traefik`
+
+⚠️ **On a fresh board with no library configured, a `type:` that needs one of these generates a
+probe with no script.** `statuspage` alone is what every third-party `*-status` type runs on, so
+that is 12 of the 22 types. The symptom is `No script source for probe`, or — worse — a silent
+degrade to a plain HTTP check that reports "HTTP 200" while checking nothing.
+
+Confirm the ids a type needs are installed before trusting it:
+
+```bash
+curl -s -H "X-API-Key: $STATUS_API_KEY" "$STATUS_URL/api/capabilities" \
+  | python3 -c "import json,sys; print(sorted(json.load(sys.stdin)['probeCatalog']))"
+```
+
+Anything missing is imported from a library — `GET /api/libraries`, then
+`POST /api/libraries/{name}/probes/{id}/import`. See `references/libraries.md`. This is step
+zero of a new board now, before the first `type:`.
 
 Custom types live beside the built-ins in the config path, so a type you write once is reusable
 across every service of that kind. **Write a type before you write the same probe twice.**

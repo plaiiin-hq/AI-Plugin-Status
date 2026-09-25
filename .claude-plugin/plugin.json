@@ -1,6 +1,6 @@
 {
   "name": "plaiiin-status",
-  "description": "Operate a Plaiiin Status server from Claude. `status-server-ops` covers the infrastructure model, probe authoring and the wiring traps that fail as silence; `status-server-api` drives a live board over its REST API (tree, history, incidents, probe authoring). Targets any deployment via STATUS_URL + STATUS_API_KEY.",
+  "description": "Operate a Plaiiin Status server from Claude. `status-server-ops` covers the infrastructure model, the probe and command libraries both kinds are imported from, and the wiring traps that fail as silence; `status-server-api` drives a live board over its REST API (tree, history, workflow records, versioned probe and command authoring). Targets any deployment via STATUS_URL + STATUS_API_KEY.",
   "author": {
     "name": "Plaiiin"
   },

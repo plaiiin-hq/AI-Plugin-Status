@@ -149,29 +149,35 @@ The legacy `type:` + `url:`/`host:`/`port:` format is still parsed for backward 
 
 ## Probe Catalog
 
-Probe definitions live in a three-layer system:
+Probe and command definitions live in a three-layer system:
 
-### 1. Built-in catalog
+### 1. Libraries — the source of truth
 
-Shipped inside the server, read-only — you cannot edit these, only install or
-override them. List what your server has with `GET /api/ide/probes`. Contains definitions for standard probe types:
+⛔ **Nothing ships inside the server jar.** A library is a **git repository** holding
+`library.yml` plus `probes/<id>/` and `commands/<id>/` directories; the server clones it into
+`{config-path}/library-cache/<name>/` and offers its entries for import. One library may publish
+both kinds, and a probe and a command may share an id.
 
 ```
-catalog/
-  probes/
-    http-health/probe.yml
-    tcp-connect/probe.yml
-    http-json/probe.yml
-    mapped-json/probe.yml
-  commands/
-    docker-restart/command.yml
-    docker-stop/command.yml
-    docker-start/command.yml
+<library repo>/
+├── library.yml               # name, description, apiVersion: 1, probes:/commands:/modules:
+├── probes/<id>/{probe.yml,check.js,…}
+├── commands/<id>/{command.yml,run.js,…}
+└── modules/                  # shared by BOTH kinds, flattened into each script at bundle time
 ```
 
-### 2. Installed catalog (`config-path/probes/`, `config-path/commands/`)
+List what is configured with `GET /api/libraries`, what one offers with
+`GET /api/libraries/{name}/probes` (or `/commands`), and import with
+`POST /api/libraries/{name}/probes/{id}/import`.
 
-User-enabled definitions. When a user "enables" a probe from the catalog, its definition is copied here. This folder is watched for changes — updates are pushed to agents immediately.
+⚠️ **`POST /api/catalog/install/{id}` and `/api/catalog/update/{id}` answer `410 Gone`** — they
+existed only to copy a built-in out of the jar.
+
+### 2. Live definitions (`config-path/probes/`, `config-path/commands/`)
+
+What agents actually run. An import copies an entry's files here verbatim — comments, key order
+and `category:` survive — and records a release and an `origin` in the entry's `versions.yml`.
+This folder is watched for changes; a live edit reaches agents on the next heartbeat.
 
 Custom probes can be added by dropping a folder with `probe.yml` + optional `check.js`:
 
@@ -182,12 +188,29 @@ probes/
     check.js        # JS executor (sandboxed GraalVM)
 ```
 
-### 3. Catalog sync
+### 3. Versions (`config-path/probes/<id>/versions.yml` + `.versions/`)
 
-- Server watches the installed folder for changes
-- Agents poll `/api/catalog/sync?hash=X` every 3 seconds
-- If the hash changed, agents pull the full catalog and hot-reload executors
-- Built-in Java executors always take precedence over script-based ones
+Both kinds are versioned. Three refs — `live`, `dev/<label>`, `rel/<version>` — with releases
+immutable and drafts yours. This is what replaced `dev: true` in a manifest, and it is why a bare
+save is refused on anything that came from a library:
+
+| Write | Answer |
+|---|---|
+| `ref: live` on a library-sourced entry | `409 <id> runs <library> <version> — edits go into a dev version` |
+| `ref: rel/<version>` | `409 Release versions are immutable` |
+| `ref: dev/<label>` | `200`, and no agent sees it until you release and activate |
+
+⛔ `POST /api/ide/toggle-dev` and `/api/ide/probe-dev` answer **`410 Gone`** for both kinds.
+
+### How a script reaches an agent
+
+- The server watches the live folder for changes (`WatchService`, 500 ms debounce, plus a 30 s
+  mtime poll).
+- **The agent does not poll `/api/catalog/sync`.** It receives `scriptSource`, `actionScripts` and
+  `shell` **inline in its heartbeat's probe assignments**; a command's `run.js` is attached at
+  dispatch time. `/api/catalog/sync` still exists but nothing calls it, and it is now admin-only.
+- Detection lag plus one heartbeat interval (default 30 s) is **up to roughly 60 s**, not 3 s.
+- Built-in Java executors always take precedence over script-based ones.
 
 ### Probe definition format (`probe.yml`)
 
@@ -221,7 +244,18 @@ Parameter modes:
 
 ### Version updates
 
-When the server ships a newer built-in version than what's installed, the admin UI shows "update available" with changelog entries since the installed version. Updates are opt-in — the user reviews changes and accepts or skips.
+When a **library** offers a newer version than what is live, `GET /api/catalog` says so — under
+`updates[]` for probes and **`libraryCommandUpdates[]`** for commands, which are deliberately
+separate keys because every button in the probe Updates list posts to the *probe* endpoint.
+
+Each row carries `offer` (`update` = import and activate · `activate` = already recorded),
+`fromVersion`/`toVersion`, `fromCommit`/`toCommit`, the changelog entries the live copy does not
+carry, and `requiresChoice: true` when what is live is a **local** release — i.e. you edited it,
+and taking the library version replaces yours (your release stays in `.versions/rel/`, one
+`activate` away).
+
+Updates are opt-in. `autoApplyProbeUpdates` and `autoApplyCommandUpdates` apply them without
+asking; both are off by default, independent of each other, and API-only.
 
 ## Pluggable Executors (Agent)
 
