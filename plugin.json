@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "plaiiin-status",
+  "version": "1.0.0",
+  "description": "Operate a Plaiiin Status server: model infrastructure, author probes, and triage a live board.",
+  "author": {
+    "name": "Plaiiin",
+    "url": "https://plaiiin.com"
+  },
+  "homepage": "https://github.com/plaiiin-hq/plaiiin-status-plugin",
+  "repository": "https://github.com/plaiiin-hq/plaiiin-status-plugin",
+  "license": "Apache-2.0",
+  "keywords": ["monitoring", "infrastructure", "status", "probes"]
+}

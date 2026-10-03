@@ -1,0 +1,20 @@
+{
+  "name": "plaiiin-status",
+  "version": "1.0.0",
+  "description": "Operate a Plaiiin Status server: model infrastructure, author probes, and triage a live board.",
+  "author": { "name": "Plaiiin" },
+  "homepage": "https://github.com/plaiiin-hq/plaiiin-status-plugin",
+  "repository": "https://github.com/plaiiin-hq/plaiiin-status-plugin",
+  "license": "Apache-2.0",
+  "keywords": ["monitoring", "infrastructure", "status", "probes"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Plaiiin Status",
+    "shortDescription": "Operate a Plaiiin Status server",
+    "longDescription": "Model infrastructure, author probes, and triage a running Plaiiin Status board.",
+    "developerName": "Plaiiin",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://plaiiin.com"
+  }
+}

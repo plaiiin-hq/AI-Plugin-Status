@@ -17,6 +17,16 @@ platform where you declare what you have and Status works out what to check.
 /plugin install plaiiin-status@plaiiin-status
 ```
 
+## Codex
+
+This repository is also a portable Codex plugin. Add it as a marketplace, then install
+`plaiiin-status` from that source:
+
+```
+codex plugin marketplace add plaiiin-hq/plaiiin-status-plugin
+codex plugin add plaiiin-status@plaiiin-status
+```
+
 ## Setup
 
 Two environment variables point the skills at your deployment:
