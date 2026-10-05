@@ -13,7 +13,7 @@ platform where you declare what you have and Status works out what to check.
 ## Install
 
 ```
-/plugin marketplace add plaiiin-hq/plaiiin-status-plugin
+/plugin marketplace add plaiiin-hq/AI-Plugin-Status
 /plugin install plaiiin-status@plaiiin-status
 ```
 
@@ -23,7 +23,7 @@ This repository is also a portable Codex plugin. Add it as a marketplace, then i
 `plaiiin-status` from that source:
 
 ```
-codex plugin marketplace add plaiiin-hq/plaiiin-status-plugin
+codex plugin marketplace add plaiiin-hq/AI-Plugin-Status
 codex plugin add plaiiin-status@plaiiin-status
 ```
 

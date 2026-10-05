@@ -7,8 +7,8 @@
     "name": "Plaiiin",
     "url": "https://plaiiin.com"
   },
-  "homepage": "https://github.com/plaiiin-hq/plaiiin-status-plugin",
-  "repository": "https://github.com/plaiiin-hq/plaiiin-status-plugin",
+  "homepage": "https://github.com/plaiiin-hq/AI-Plugin-Status",
+  "repository": "https://github.com/plaiiin-hq/AI-Plugin-Status",
   "license": "Apache-2.0",
   "keywords": ["monitoring", "infrastructure", "status", "probes"]
 }

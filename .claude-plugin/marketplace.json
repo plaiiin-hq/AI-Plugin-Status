@@ -14,7 +14,7 @@
       },
       "category": "monitoring",
       "source": "./",
-      "homepage": "https://github.com/plaiiin-hq/plaiiin-status-plugin",
+      "homepage": "https://github.com/plaiiin-hq/AI-Plugin-Status",
       "license": "Apache-2.0"
     }
   ]
