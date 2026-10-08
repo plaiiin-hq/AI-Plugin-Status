@@ -182,7 +182,8 @@ If this endpoint 404s you are on a build from before 2026-08-27.
 
 | Endpoint | Use |
 |---|---|
-| `GET /api/status` | Overall rollup — start here for "is anything wrong". |
+| `GET /api/status/summary` | **Start here** for "is anything wrong": `errors` `warnings` `unknown` `muted`, active mutes, work, `untrackedIssues`, and a flat `probeDetails` list (name, state, uptime, last message). About 20 KB. Builds from 2026-10-08 on; older ones answer 404, use `/api/status` there. |
+| `GET /api/status` | The whole board as the web app draws it: both trees with every probe's sparklines. **2.8 MB** on a 75-probe board, every probe twice — too big to read whole; use the summary unless you need a node's `result`. |
 | `GET /api/tree` | The **full** probe tree. The authoritative view: use it to confirm a `ref` actually resolved and a probe actually ran. |
 | `GET /api/global` | Tab list / global SPA state. |
 | `GET /api/events` | Recent state transitions. |
@@ -454,10 +455,16 @@ write landed, not that it kept what you sent. For anything meant to last, edit t
 
 ## MCP server — not currently distributed
 
-Status has an internal MCP server (15 tools: state, incidents, drills/users) built for its
-chat responder. It is **not part of this plugin and not currently shipped to customers**, and
-it is read-only apart from incidents. Everything below the *Setup* section works over plain
-HTTP, so nothing in this skill depends on it. Ask your Plaiiin contact if you want it.
+Status Chat (the desktop client) hosts an MCP server on a Unix socket for its chat responder:
+17 tools over the endpoints above. The board tool reads `/api/status/summary`, the tree tool
+takes `root` and `problems_only`, and the incident tools go through `/api/workflows/incident`
+(list, get, create, comment, `transition_incident`, `resolve_incident`). It is **not part of
+this plugin and not shipped to customers**. Everything in this skill works over plain HTTP, so
+nothing here depends on it.
+
+`errors` counts probes in ERROR only. Before 2026-10-08 it also counted UNKNOWN (a probe not yet
+run, or whose agent went quiet), so right after a restart it read about 3 times too high; on an
+older build, count `probeDetails` by `state` instead of trusting the number.
 
 ## See also
 

@@ -37,7 +37,8 @@ if they ever disagree.
 | `GET /api/probes/infographic?probe=<name>` | Infographic SVG + resolved patches |
 | `GET /api/probes/result?probe=<name>` | Latest structured result. **`probe` is required** |
 | `GET /api/probes/snapshot?probe=<name>` | Latest value of every path. **`probe` is required** |
-| `GET /api/status` |  |
+| `GET /api/status` | The whole board (both trees, sparklines). 2.8 MB on a 75-probe board |
+| `GET /api/status/summary` | Counters, mutes, work, untracked issues, flat probe list; no trees. About 20 KB |
 | `GET /api/tree` | Path-based tree built from all probe names + history probes |
 | `GET /api/untracked-issues` | Degraded probes in mapped projects — used by the topbar alert badge |
 
@@ -395,7 +396,7 @@ including `/api/admin/storage/stale` and `/api/admin/storage/cleanup`, covered i
 | `GET /api/admin/retention-presets` |  |
 | `POST /api/admin/retention-presets` |  |
 | `DELETE /api/admin/retention-presets/{name}` |  |
-| `GET /api/admin/server-info` |  |
+| `GET /api/admin/server-info` | version, `commit` (from 2026-10-08), uptime, heap, `probeErrors` `probeWarnings` `probeUnknown` |
 | `GET /api/admin/storage` |  |
 | `POST /api/admin/storage/cleanup` | Delete abandoned series |
 | `POST /api/admin/storage/delete` |  |
