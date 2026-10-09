@@ -225,12 +225,12 @@ curl -s -H "$K" "$STATUS_URL/api/handled"
 
 # mark a probe handled — path is the FULL probe name, copied from /api/tree
 curl -s -X PUT -H "$K" -H 'Content-Type: application/json' \
-  -d '{"target":{"kind":"node","type":"probe","path":"Agents / app-01.example.com / Web Reachable"},"note":"Looking at the proxy"}' \
+  -d '{"target":{"kind":"node","type":"probe","path":"Agents / app-01.example.com / Web Reachable"},"note":"Looking at the proxy","replaces":null}' \
   "$STATUS_URL/api/handled"
 
 # with a ticket: url + system + externalId (the same system+externalId again changes nothing)
 curl -s -X PUT -H "$K" -H 'Content-Type: application/json' \
-  -d '{"target":{"kind":"node","type":"app","path":"shop / Checkout"},"url":"https://jira.example.com/browse/OPS-12","system":"jira","externalId":"OPS-12"}' \
+  -d '{"target":{"kind":"node","type":"app","path":"shop / Checkout"},"url":"https://jira.example.com/browse/OPS-12","system":"jira","externalId":"OPS-12","replaces":null}' \
   "$STATUS_URL/api/handled"
 
 # clear — query parameters, path URL-encoded
@@ -261,8 +261,9 @@ curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
 | Your clears read `tracker` | Every `X-API-Key` clear records reason `tracker`; only a browser session or a bearer token records `manual` |
 | Still dimmed after a clear | Until the workflow engine is removed, an open workflow record also marks a node handled |
 | Tracker errors | `502 {"error":{"code":"tracker_error","message":…}}` — the message is the tracker's reason. `did not answer within 10 s` on a create adds `the ticket may still have been created there`: search before you create again |
-| `not_marked` (400 or 500) or `409 conflict` from `…/tickets` | The ticket WAS created (it is in the answer's `ticket`); only the mark failed, or someone else marked the target at the same moment. Do not retry, or you file it twice — `PUT /api/handled` with the ticket's `url` instead |
-| `409 conflict` from `PUT /api/handled` | Someone else marked the same target at the same moment; nothing of yours is stored. `GET /api/handled` and decide again |
+| `409 conflict` from `…/tickets` with `current` | Someone is already on that target (`current` says who); no ticket was filed. Link to theirs, or create with `"replaces": <current.id>` if you really replace it |
+| `not_marked` (400 or 500), or `409 conflict` with a `ticket`, from `…/tickets` | The ticket WAS created (it is in the answer's `ticket`); only the mark failed, or someone marked the target while it was being created. Do not retry, or you file it twice — `PUT /api/handled` with the ticket's `url` instead |
+| `409 conflict` from `PUT /api/handled` | You sent `replaces` (`null` = nobody) and the target holds something else: `current` beside `error`. Nothing of yours is stored. Send `"replaces": null` on a mark unless you mean to replace `current.id` — without `replaces` a PUT silently replaces whoever is on it |
 | `500 not_stored` from `PUT /api/handled` | The write itself failed (disk full, a locked database); nothing is stored. Try again once the server is healthy |
 | A 400 | `error.code` says which: `missing_target`, `missing_fields` (names in `error.missing`), `bad_target`, `bad_clear_after`, `invalid_field` (`url` 2048, `title` 300, `externalId` 200, `note` 2000 characters; the message names the field), `bad_request` |
 
@@ -524,9 +525,9 @@ write landed, not that it kept what you sent. For anything meant to last, edit t
 Status Chat (the desktop client) hosts an MCP server on a Unix socket for its chat responder:
 16 tools over the endpoints above. The board tool reads `/api/status/summary`, the tree tool
 takes `root` and `problems_only`, and 5 tools work with handled references:
-`list_handled(history?)`, `mark_handled(path, type?, todo_id?, url?, note?)`,
+`list_handled(history?)`, `mark_handled(path, type?, todo_id?, url?, note?, replaces?)`,
 `clear_handled(path, type?, todo_id?)`, `find_tickets(query, tracker?)` and
-`create_ticket(path, type?, todo_id?, title?, note?, tracker?)`. Its 6 incident tools are gone
+`create_ticket(path, type?, todo_id?, title?, note?, tracker?, replaces?)`. Its 6 incident tools are gone
 since 2026-10-09. `problems_only` still lists a handled red probe; its `handled`/`handledBy`
 fields say so. It is **not part of this plugin and not shipped to customers**. Everything in
 this skill works over plain HTTP, so nothing here depends on it.
