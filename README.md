@@ -8,7 +8,7 @@ platform where you declare what you have and Status works out what to check.
 | Skill | Purpose |
 |---|---|
 | `status-server-ops` | Model infrastructure in `infrastructure.yml`, import probes and commands from a **library**, author and version them, apply config without dropping every session — and the wiring mistakes that fail as **silence** rather than as errors. |
-| `status-server-api` | Drive a running board from Claude: read the tree and probe history, triage what is red, open and transition incidents (records of workflow type `incident`), author probes and commands over `/api/ide/*`. |
+| `status-server-api` | Drive a running board from Claude: read the tree and probe history, triage what is red, mark it handled (with or without a ticket), open and transition incidents (records of workflow type `incident`), author probes and commands over `/api/ide/*`. |
 
 ## Install
 

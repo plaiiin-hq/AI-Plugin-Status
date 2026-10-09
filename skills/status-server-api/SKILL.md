@@ -1,6 +1,6 @@
 ---
 name: status-server-api
-description: Use when reading or driving a running Plaiiin Status server from Claude — checking what is currently red, reading the probe tree or a probe's history, opening/transitioning/commenting on incidents (which are workflow records), or authoring probes, commands and their dashboard layouts (widgets, tiles) over the REST API. Covers X-API-Key auth, the /api/** boundary that makes wrong paths look like a login redirect, the role gate on probe authoring, and the version store that makes a plain save refuse. Also covers the credentials store — how a probe authenticates to what it monitors. Your own API key lives in ~/.plaiiin/status-server/env; read that before asking anyone for one.
+description: Use when reading or driving a running Plaiiin Status server from Claude — checking what is currently red, reading the probe tree or a probe's history, marking a red node or todo as handled (with or without a ticket, through a tracker such as the Workflow server), opening/transitioning/commenting on incidents (which are workflow records), or authoring probes, commands and their dashboard layouts (widgets, tiles) over the REST API. Covers X-API-Key auth, the /api/** boundary that makes wrong paths look like a login redirect, the role gate on probe authoring, and the version store that makes a plain save refuse. Also covers the credentials store — how a probe authenticates to what it monitors. Your own API key lives in ~/.plaiiin/status-server/env; read that before asking anyone for one.
 ---
 
 # Driving a live Status board
@@ -49,7 +49,7 @@ account you are signed in as when you click *New key* decides what the key can d
 | Signed in as | Key can |
 |---|---|
 | an account with **no** Status role | `GET /api/user/profile` and nothing else — every other `/api/**` path answers `403` |
-| an ordinary user (any one role) | read state, read history, work with workflow records |
+| an ordinary user (any one role) | read state, read history, mark and clear handled references, work with workflow records |
 | `STATUS_ADMIN` / `INFRA_ADMIN` | all of the above **plus** `/api/ide/**` — writing probe and command scripts that execute on every monitored host, and writing config |
 | `STATUS_ADMIN` alone | the tier above that: releasing and activating a version, uninstalling, and adding or removing a library |
 
@@ -190,7 +190,7 @@ If this endpoint 404s you are on a build from before 2026-08-27.
 | `GET /api/probes/history?probe=<name>&resolution=5s` | Time series for one probe. Resolutions step up (`5s`, `1m`, …) — ask for the coarsest that answers the question. |
 | `GET /api/probes/history/list` | Which probes have history at all. **A probe with no history has never run** — that is the trap-1 signature from `status-server-ops`. |
 | `GET /api/probes/snapshot?probe=<name>` | Current value of every path for one probe. |
-| `GET /api/untracked-issues` | Things failing that no workflow record covers yet — the natural triage queue. |
+| `GET /api/untracked-issues` | Things failing that nobody has marked handled and no workflow record covers — the natural triage queue. |
 | `GET /api/presence` | Who is online. |
 | `GET /api/agents` | The agents, with their heartbeat data. |
 | `GET /api/infrastructure/config` | The whole declared infrastructure — hosts, projects, dependencies, thresholds. |
@@ -205,6 +205,72 @@ empty result.
 Probe names in the tree are **whitespace-sensitive path strings**:
 `Agents / app-01.example.com / Web Reachable`. Copy them from `/api/tree` rather than
 retyping — a near-miss returns empty, not an error.
+
+## Handled — saying who is on a red, with or without a ticket
+
+A **handled reference** is one small fact on a board node or a todo: somebody is on it, and
+here is where (a ticket URL, or just a note). The covered nodes go quiet in rollups and drop out
+of `untrackedIssues`, `/api/untracked-issues` and the bell (the error/warning counters still count it). **Alerts keep firing** —
+handled is for people reading the board; a mute is what silences notifications. Builds from
+2026-10-09 on; older ones answer `404` on `/api/handled`.
+
+**Mark before you investigate, not after.** A red that two people (or an agent and a person)
+work on at once is how a fix gets made twice.
+
+```bash
+K="X-API-Key: $STATUS_API_KEY"
+
+# what is handled right now (add ?history=true for cleared ones and why)
+curl -s -H "$K" "$STATUS_URL/api/handled"
+
+# mark a probe handled — path is the FULL probe name, copied from /api/tree
+curl -s -X PUT -H "$K" -H 'Content-Type: application/json' \
+  -d '{"target":{"kind":"node","type":"probe","path":"Agents / app-01.example.com / Web Reachable"},"note":"Looking at the proxy"}' \
+  "$STATUS_URL/api/handled"
+
+# with a ticket: url + system + externalId (the same system+externalId again changes nothing)
+curl -s -X PUT -H "$K" -H 'Content-Type: application/json' \
+  -d '{"target":{"kind":"node","type":"app","path":"shop / Checkout"},"url":"https://jira.example.com/browse/OPS-12","system":"jira","externalId":"OPS-12"}' \
+  "$STATUS_URL/api/handled"
+
+# clear — query parameters, path URL-encoded
+curl -s -X DELETE -H "$K" \
+  "$STATUS_URL/api/handled?kind=node&type=probe&path=Agents%20%2F%20app-01.example.com%20%2F%20Web%20Reachable"
+
+# tickets through a configured tracker (the Workflow server today)
+curl -s -H "$K" "$STATUS_URL/api/handled/trackers"                       # [{id, displayName, kind}]
+curl -s -H "$K" "$STATUS_URL/api/handled/trackers/<id>/search?q=proxy"   # [{id, title, url, state}]
+curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
+  -d '{"target":{"kind":"node","type":"probe","path":"Agents / app-01.example.com / Web Reachable"},"title":"Proxy answers 502"}' \
+  "$STATUS_URL/api/handled/trackers/<id>/tickets"                           # creates the ticket AND marks it handled
+```
+
+| Target | `type` | `path` |
+|---|---|---|
+| one probe | `probe` | the full probe name (`result.probeName`) |
+| a branch: service, app, project | `service` `app` `project` | the infrastructure path; covers every probe under it |
+| a host | `host` | the bare host name; covers `Agents / <host> / …` and `Hosts / <host> / …` |
+| one todo | `probe`, with `kind: "todo"` and `todoId` | the full name of the probe that reports it |
+
+| Trap | |
+|---|---|
+| A short display name as `path` | Refused at set time: `404 unknown_target`, nothing stored. Copy `path` from `/api/tree` |
+| A host as `type: project` | Also `404 unknown_target`. A host is `type: host` |
+| It clears by itself | After every covered probe is continuously `OK` for 1 h (`clearAfter` overrides it per reference: seconds such as `600`, or a duration such as `"30m"`); `UNKNOWN` never counts as `OK`. A todo clears when its probe stops reporting it |
+| One per target | A new `PUT` on the same target replaces the active one (the old one is cleared `manual`) |
+| Your clears read `tracker` | Every `X-API-Key` clear records reason `tracker`; only a browser session or a bearer token records `manual` |
+| Still dimmed after a clear | Until the workflow engine is removed, an open workflow record also marks a node handled |
+| Tracker errors | `502 {"error":{"code":"tracker_error","message":…}}` — the message is the tracker's reason. `did not answer within 10 s` on a create adds `the ticket may still have been created there`: search before you create again |
+| `not_marked` (400 or 500) or `409 conflict` from `…/tickets` | The ticket WAS created (it is in the answer's `ticket`); only the mark failed, or someone else marked the target at the same moment. Do not retry, or you file it twice — `PUT /api/handled` with the ticket's `url` instead |
+| `409 conflict` from `PUT /api/handled` | Someone else marked the same target at the same moment; nothing of yours is stored. `GET /api/handled` and decide again |
+| `500 not_stored` from `PUT /api/handled` | The write itself failed (disk full, a locked database); nothing is stored. Try again once the server is healthy |
+| A 400 | `error.code` says which: `missing_target`, `missing_fields` (names in `error.missing`), `bad_target`, `bad_clear_after`, `invalid_field` (`url` 2048, `title` 300, `externalId` 200, `note` 2000 characters; the message names the field), `bad_request` |
+
+Tracker settings (🔒 `STATUS_ADMIN` or `INFRA_ADMIN`): `GET /api/handled/trackers/config` lists
+them all, `PUT /api/handled/trackers/config/{id}` creates or replaces one, `DELETE` on the same
+path removes it. There is no `GET` for a single one, and `config` is not a valid tracker id. The
+Workflow API key sits in the credentials store and is referenced by `credentialName`. Full list:
+`references/api-surface.md` → *Handled*.
 
 ## Incidents — a workflow type, not an endpoint of their own
 
@@ -456,11 +522,14 @@ write landed, not that it kept what you sent. For anything meant to last, edit t
 ## MCP server — not currently distributed
 
 Status Chat (the desktop client) hosts an MCP server on a Unix socket for its chat responder:
-17 tools over the endpoints above. The board tool reads `/api/status/summary`, the tree tool
-takes `root` and `problems_only`, and the incident tools go through `/api/workflows/incident`
-(list, get, create, comment, `transition_incident`, `resolve_incident`). It is **not part of
-this plugin and not shipped to customers**. Everything in this skill works over plain HTTP, so
-nothing here depends on it.
+16 tools over the endpoints above. The board tool reads `/api/status/summary`, the tree tool
+takes `root` and `problems_only`, and 5 tools work with handled references:
+`list_handled(history?)`, `mark_handled(path, type?, todo_id?, url?, note?)`,
+`clear_handled(path, type?, todo_id?)`, `find_tickets(query, tracker?)` and
+`create_ticket(path, type?, todo_id?, title?, note?, tracker?)`. Its 6 incident tools are gone
+since 2026-10-09. `problems_only` still lists a handled red probe; its `handled`/`handledBy`
+fields say so. It is **not part of this plugin and not shipped to customers**. Everything in
+this skill works over plain HTTP, so nothing here depends on it.
 
 `errors` counts probes in ERROR only. Before 2026-10-08 it also counted UNKNOWN (a probe not yet
 run, or whose agent went quiet), so right after a restart it read about 3 times too high; on an

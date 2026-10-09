@@ -269,6 +269,28 @@ wrong, check role membership before suspecting the drill.
 | `POST /api/drills/{id}/accept` |  |
 | `POST /api/drills/{id}/close` |  |
 
+## Handled
+
+One reference per board node or todo saying somebody is on it, optionally pointing at a ticket in
+any tracker. Status clears it after every covered probe is continuously `OK` for `clearAfter`
+(default 1 h), when a todo stops being reported, or 24 h after the target disappears. It does not
+silence alerts. When several cover one probe, the nearest wins (probe or dependency, service, app,
+project or host; the newer on a tie).
+
+| Endpoint | |
+|---|---|
+| `GET /api/handled` | `{active:[…]}`; `?history=true` adds `history:[…]` (newest 200) with `clearedAt` and `clearedReason` (`green` `done` `target-gone` `manual` `tracker`). Each reference: `id, target, url, title, system, externalId, note, createdBy, createdAt, clearAfterSeconds, greenSince, missingSince, clearedAt, clearedReason, active` |
+| `PUT /api/handled` | `{target:{kind,type,path,todoId?}, url?, title?, system?, externalId?, note?, clearAfter?}` (`clearAfter`: seconds, or a duration such as `"30m"`; at least 1 s). Replaces the active reference on that target; the same `system`+`externalId` again changes nothing. Errors `{error:{code,message}}`: `400` `missing_target`, `missing_fields` (+`missing:[…]`), `bad_target`, `bad_clear_after`, `invalid_field` (`url` 2048, `title` 300, `externalId` 200, `note` 2000 characters; the message names the field), `bad_request`; `404 unknown_target` (nothing on the board under that target; nothing stored); `409 conflict` (someone else marked it at the same moment); `500 not_stored` (the write itself failed; nothing stored) |
+| `DELETE /api/handled?kind=&type=&path=&todoId=` | `{ok:true}`, or `{ok:false}` when nothing was active. Reason `tracker` for an API key, `manual` for a session or a bearer token |
+| `GET /api/handled/trackers` | enabled connectors `[{id, displayName, kind}]` |
+| `GET /api/handled/trackers/{id}/search?q=` | `[{id, title, url, state}]`; `404 unknown_tracker`; `502 tracker_error` when the tracker refuses, cannot be reached or does not answer within 10 s |
+| `POST /api/handled/trackers/{id}/tickets` | `{target, title?, note?}` → `{ticket, ref}`: creates the ticket and sets the reference. No ticket filed on `400 invalid_field`, `404 unknown_tracker` or `404 unknown_target` (checked before the tracker is asked). `409 conflict` and `not_marked` (400 refused, 500 store failed) carry the created `ticket` beside `error`: do not retry. `502 tracker_error` marks nothing; a timed-out create says the ticket may still have been created |
+| `GET /api/handled/trackers/config` 🔒 | every connector's settings, disabled ones included, never the key |
+| `PUT /api/handled/trackers/config/{id}` 🔒 | create or replace one connector: `{kind?, displayName?, serverUrl, workspace, ticketType?, credentialName, enabled?}`. `400`: `missing_fields`, `bad_tracker_id`, `unsupported_kind`, `bad_server_url`, `unknown_credential`, `invalid_config` |
+| `DELETE /api/handled/trackers/config/{id}` 🔒 | `{ok:true}`, or `{ok:false}` when there was none |
+
+No `GET /api/handled/trackers/config/{id}` exists; `config` is a reserved tracker id.
+
 ## Workflows
 
 User-defined record types with a state machine — the system that replaced legacy incidents. A
