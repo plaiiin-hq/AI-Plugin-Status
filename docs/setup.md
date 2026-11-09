@@ -19,7 +19,7 @@ variables of the same name take precedence, so a one-off override still works.
 
 ## 2. Mint an API key
 
-In the SPA: **Settings → API keys → New key**. Over the API:
+In the web app: click your name (bottom left) → **Account** → the **API Keys** card → *Create*. Over the API:
 
 ```bash
 curl -s -X POST -H "X-API-Key: $EXISTING_KEY" -H 'Content-Type: application/json' \
