@@ -37,14 +37,14 @@ asked for a key.
 
 | Route | How |
 |---|---|
-| **Admin UI** | Settings → **API keys** → *New key*. The raw key is shown **once** — copy it straight into the file above. |
+| **Web UI** | Click your name (bottom left) → **Account** → the **API Keys** card → name it → *Create*. The raw key is shown **once** — copy it straight into the file above. |
 | **API** (needs an existing key) | `POST /api/user/api-keys` with `{"name":"…"}` |
 
 List or revoke yours with `GET /api/user/api-keys` and
 `POST /api/user/api-keys/{id}/revoke`.
 
 **A key inherits the roles of the user who minted it** — there is no per-key scoping. So the
-account you are signed in as when you click *New key* decides what the key can do:
+account you are signed in as when you click *Create* decides what the key can do:
 
 | Signed in as | Key can |
 |---|---|
