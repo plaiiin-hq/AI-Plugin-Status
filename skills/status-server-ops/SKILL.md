@@ -60,7 +60,7 @@ account you are signed in as when you click *New key* decides what the key can d
 | Signed in as | Key can |
 |---|---|
 | an account with **no** Status role | `GET /api/user/profile` and nothing else — every other `/api/**` path is `403` |
-| an ordinary user (any one role) | read state, read history, work with workflow records |
+| an ordinary user (any one role) | read state, read history, mark and clear handled references |
 | `STATUS_ADMIN` / `INFRA_ADMIN` | all of the above **plus** `/api/ide/**` — writing probe and command scripts that execute on every monitored host, and writing config |
 | `STATUS_ADMIN` alone | releasing and activating a version, uninstalling an entry, adding or removing a library |
 
@@ -136,7 +136,7 @@ Read these on demand — they are the authoritative detail, not summaries.
 | `references/icons.md` | The icon set for hosts, apps, services and types. |
 | `references/probe-active-folder.md` · `references/probe-vs-command.md` | Active-folder mechanics; when to write a command instead of a probe. |
 | `references/infrastructure-model.md` | The model in prose — hosts, host-agents, agent security, agent policies. |
-| `status-server-api` → `references/api-surface.md` | **Every endpoint** (172) grouped by area — workflows, sites, drills, agents, IAM, topology and the rest. |
+| `status-server-api` → `references/api-surface.md` | **Every endpoint** grouped by area — handled references, sites, drills, agents, IAM, topology and the rest. |
 
 ## The model
 
@@ -774,7 +774,7 @@ curl -s -H "$K" "$STATUS_URL/api/events"
 # 5. one probe's series, to confirm it is producing values
 curl -s -H "$K" "$STATUS_URL/api/probes/history?probe=<name>&resolution=5s"
 
-# 6. failing things no workflow record covers yet — the triage queue
+# 6. failing things nobody has marked handled or muted — the triage queue
 curl -s -H "$K" "$STATUS_URL/api/untracked-issues"
 ```
 
@@ -783,6 +783,6 @@ never executed once — that is trap 1, and the absence of a history entry is ho
 
 ## See also
 
-`status-server-api` — driving a live board: read surfaces, probe history, incidents (which are
-records of workflow type `incident`, not an `/api/incidents` endpoint), the `ref` rules that make
+`status-server-api` — driving a live board: read surfaces, probe history, marking a red handled
+(there are no incident records and no `/api/workflows` since `v1.0.0-pre.13`), the `ref` rules that make
 a plain `probe-save` refuse, and the role gate on `/api/ide/**`.

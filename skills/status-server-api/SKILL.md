@@ -1,6 +1,6 @@
 ---
 name: status-server-api
-description: Use when reading or driving a running Plaiiin Status server from Claude — checking what is currently red, reading the probe tree or a probe's history, marking a red node or todo as handled (with or without a ticket, through a tracker such as the Workflow server), opening/transitioning/commenting on incidents (which are workflow records), or authoring probes, commands and their dashboard layouts (widgets, tiles) over the REST API. Covers X-API-Key auth, the /api/** boundary that makes wrong paths look like a login redirect, the role gate on probe authoring, and the version store that makes a plain save refuse. Also covers the credentials store — how a probe authenticates to what it monitors. Your own API key lives in ~/.plaiiin/status-server/env; read that before asking anyone for one.
+description: Use when reading or driving a running Plaiiin Status server from Claude — checking what is currently red, reading the probe tree or a probe's history, marking a red node or todo as handled (with or without a ticket, through a tracker such as the Workflow server), or authoring probes, commands and their dashboard layouts (widgets, tiles) over the REST API. Covers X-API-Key auth, the /api/** boundary that makes wrong paths look like a login redirect, the role gate on probe authoring, and the version store that makes a plain save refuse. Also covers the credentials store — how a probe authenticates to what it monitors. Your own API key lives in ~/.plaiiin/status-server/env; read that before asking anyone for one.
 ---
 
 # Driving a live Status board
@@ -49,7 +49,7 @@ account you are signed in as when you click *New key* decides what the key can d
 | Signed in as | Key can |
 |---|---|
 | an account with **no** Status role | `GET /api/user/profile` and nothing else — every other `/api/**` path answers `403` |
-| an ordinary user (any one role) | read state, read history, mark and clear handled references, work with workflow records |
+| an ordinary user (any one role) | read state, read history, mark and clear handled references |
 | `STATUS_ADMIN` / `INFRA_ADMIN` | all of the above **plus** `/api/ide/**` — writing probe and command scripts that execute on every monitored host, and writing config |
 | `STATUS_ADMIN` alone | the tier above that: releasing and activating a version, uninstalling, and adding or removing a library |
 
@@ -74,6 +74,8 @@ curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
 
 Roles: `VIEWER` `HISTORY_USER` `HISTORY_CONFIG` `INCIDENT_RESPONDER` `INCIDENT_MANAGER`
 `DRILL_RESPONDER` `DRILL_MANAGER` `PROBE_EDITOR` `WORK_USER` `STATUS_ADMIN` `INFRA_ADMIN`.
+
+`INCIDENT_RESPONDER` and `INCIDENT_MANAGER` still exist and gate nothing since `v1.0.0-pre.13`.
 
 `WORK_USER` gates the work lane and the todos probes report, and it **hides** rather than
 disables: a key without it does not see the lane at all. If a board's work column looks
@@ -125,9 +127,10 @@ If a call redirects to `/app/login`, check the path before you check the key.
 **Fixed on builds from 2026-08-27.** A missing parameter now returns a proper
 `400 {"status":400,"error":"Bad Request","path":"…"}`.
 
-On an older build it redirects instead: `GET /api/workflows/attachable` lands on the login
-page, while the same call with `?kind=probe` returns `200`. Nothing in the response says "you
-forgot a parameter" — it looks exactly like being logged out. **If you get a 302 on a server
+On an older build it redirects instead: a call that lacks a required parameter (`GET
+/api/probes/history` without `probe=`, for one) lands on the login page, while the same call with
+the parameter returns `200`. Nothing in the response says "you forgot a parameter" — it looks
+exactly like being logged out. **If you get a 302 on a server
 that old, check the endpoint's required parameters before suspecting your credentials.**
 
 
@@ -149,7 +152,7 @@ config, at `/admin/infrastructure/api/config`) and were unreachable with a key.
 
 | File | Covers |
 |---|---|
-| `references/api-surface.md` | **Every endpoint** (172), grouped by area, generated from the server source, with 🔒 marking the role-gated ones. Start here to find something. |
+| `references/api-surface.md` | **Every endpoint**, grouped by area, generated from the server source, with 🔒 marking the role-gated ones. Start here to find something. |
 | `references/api-endpoints.md` | Hand-written detail on the main endpoints — params and response shapes. |
 | `references/endpoints.md` | The wider surface, including admin and agent routes. |
 
@@ -190,7 +193,7 @@ If this endpoint 404s you are on a build from before 2026-08-27.
 | `GET /api/probes/history?probe=<name>&resolution=5s` | Time series for one probe. Resolutions step up (`5s`, `1m`, …) — ask for the coarsest that answers the question. |
 | `GET /api/probes/history/list` | Which probes have history at all. **A probe with no history has never run** — that is the trap-1 signature from `status-server-ops`. |
 | `GET /api/probes/snapshot?probe=<name>` | Current value of every path for one probe. |
-| `GET /api/untracked-issues` | Things failing that nobody has marked handled and no workflow record covers — the natural triage queue. |
+| `GET /api/untracked-issues` | Things failing that nobody has marked handled or muted — the natural triage queue. The same entries as `untrackedIssues` in the summary, without the checks of an agent the configuration does not list. |
 | `GET /api/presence` | Who is online. |
 | `GET /api/agents` | The agents, with their heartbeat data. |
 | `GET /api/infrastructure/config` | The whole declared infrastructure — hosts, projects, dependencies, thresholds. |
@@ -220,7 +223,8 @@ work on at once is how a fix gets made twice.
 ```bash
 K="X-API-Key: $STATUS_API_KEY"
 
-# what is handled right now (add ?history=true for cleared ones and why)
+# what is handled right now (add ?history=true for cleared ones and why,
+# or ?probe=<full check name> for the marks of one check, cleared ones included)
 curl -s -H "$K" "$STATUS_URL/api/handled"
 
 # mark a probe handled — path is the FULL probe name, copied from /api/tree
@@ -259,7 +263,7 @@ curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
 | It clears by itself | After every covered probe is continuously `OK` for 1 h (`clearAfter` overrides it per reference: seconds such as `600`, or a duration such as `"30m"`); `UNKNOWN` never counts as `OK`. A todo clears when its probe stops reporting it |
 | One per target | A new `PUT` on the same target replaces the active one (the old one is cleared `manual`) |
 | Your clears read `tracker` | Every `X-API-Key` clear records reason `tracker`; only a browser session or a bearer token records `manual` |
-| Still dimmed after a clear | Until the workflow engine is removed, an open workflow record also marks a node handled |
+| Still dimmed after a clear | Another reference covers the node: one on a branch or host above it, or on a branch that refers to it. `handledBy.targetPath` names where it sits. (On a server older than `v1.0.0-pre.13`, an open workflow record can be the reason too) |
 | Tracker errors | `502 {"error":{"code":"tracker_error","message":…}}` — the message is the tracker's reason. `did not answer within 10 s` on a create adds `the ticket may still have been created there`: search before you create again |
 | `409 conflict` from `…/tickets` with `current` | Someone is already on that target (`current` says who); no ticket was filed. Link to theirs, or create with `"replaces": <current.id>` if you really replace it |
 | `not_marked` (400 or 500), or `409 conflict` with a `ticket`, from `…/tickets` | The ticket WAS created (it is in the answer's `ticket`); only the mark failed, or someone marked the target while it was being created. Do not retry, or you file it twice — `PUT /api/handled` with the ticket's `url` instead |
@@ -273,63 +277,28 @@ path removes it. There is no `GET` for a single one, and `config` is not a valid
 Workflow API key sits in the credentials store and is referenced by `credentialName`. Full list:
 `references/api-surface.md` → *Handled*.
 
-## Incidents — a workflow type, not an endpoint of their own
+## Incidents — there are none; mark the red handled
 
-⛔ **There is no `/api/incidents`.** It answers `404`. The workflow engine replaced the legacy
-incident model: an incident is a *record of type `incident`* moving through a declared state
-machine, and the same endpoints serve every other record type a deployment declares.
+⛔ **Status keeps no incident records.** Since `v1.0.0-pre.13` (2026-11-16) the embedded workflow
+engine is gone: `/api/workflows/**` answers `404`, as `/api/incidents` has for longer, and the
+web app has no Incident tab and no workflow type editor. Status says **who is on a problem**; the
+ticket, if there is one, lives in a tracker.
 
-**Read the type before you write an instance.** `GET /api/workflows/types/incident` returns the
-nodes, the edges between them and the fields each node shows. On a stock deployment that is
-`open` `investigating` `identified` `monitoring` `mitigating` `resolved`, with `* → resolved`
-reachable from anywhere; the fields are `title` `severity` `assignee` `eta` `summary`
-`services` `postmortem`. **Read it rather than trusting that list** — a deployment can edit its
-own types, and a `to` that is not a node is refused.
-
-```bash
-K="X-API-Key: $STATUS_API_KEY"
-
-# what types exist, and what this one's state machine looks like
-curl -s -H "$K" "$STATUS_URL/api/workflows/types"
-curl -s -H "$K" "$STATUS_URL/api/workflows/types/incident"
-
-# list
-curl -s -H "$K" "$STATUS_URL/api/workflows/incident"
-
-# open — fields are whatever the type declares
-curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
-  -d '{"fields":{"title":"Checkout latency elevated","severity":"minor"}}' \
-  "$STATUS_URL/api/workflows/incident"
-
-# comment — the field is `text`
-curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
-  -d '{"text":"Traced to the payments upstream."}' \
-  "$STATUS_URL/api/workflows/incident/<id>/comments"
-
-# move it along — `to` is a node id from the type, `version` is the instance's current version
-curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
-  -d '{"to":"resolved","version":3,"fields":{"summary":"Upstream recovered; p99 under 400ms."}}' \
-  "$STATUS_URL/api/workflows/incident/<id>/transitions"
-
-# attach the probe that is red, so the record and the board point at each other
-curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
-  -d '{"kind":"probe","id":"<probe-id>"}' \
-  "$STATUS_URL/api/workflows/incident/<id>/references"
-```
-
-A reference is only accepted by a type that declares it accepts that kind — ask which do with
-`GET /api/workflows/attachable?kind=probe` (the `kind` parameter is **required**; omitting it is
-a `400`).
-
-| Trap | |
+| You want to | Do |
 |---|---|
-| `name` is an **i18n map** | `{"en":"Incident","de":"Vorfall"}`. Rendering it directly prints an object. True of type and field labels throughout |
-| `version` is optimistic locking | Send the instance's current `version` on a transition or a field patch. Omit it and you send `0` |
-| An edge's `when` is a **hard gate** | A transition whose condition is false is refused with `when_condition_false`, not let through with a warning. `override: true` is opt-in and separate |
-| Comment field | `text`. `content` or `comment` posts an empty comment and still answers `204` |
+| say you are on a red | `PUT /api/handled` with a `note` (see *Handled* above) |
+| open a ticket for it | `POST /api/handled/trackers/<id>/tickets`, which files it and marks the target in one call |
+| point at a ticket that exists | `PUT /api/handled` with its `url` (and `system`, `externalId`) |
+| read what happened on a check | `GET /api/handled?probe=<full check name>`: every mark that covered it, cleared ones included, with who, note, ticket, from when to when and why it ended. In the web app: the clock button on the check's row |
+| read the state changes | `GET /api/events`, or `GET /api/probes/history?probe=<name>&resolution=5s` |
 
-Prefer opening a record over letting a red sit unexplained — an unexplained red is how people
-learn to ignore red. Full endpoint list: `references/api-surface.md` → *Workflows*.
+Prefer marking a red over letting it sit unexplained: an unexplained red is how people learn to
+ignore red.
+
+**On a server older than `v1.0.0-pre.13`** the engine still runs: `GET /api/workflows/types`
+answers `200`, and an open record there also marks a check handled (its `handledBy` carries only
+`workflowType`, `instanceId` and `title`, and the handled API cannot clear it). Its records are not
+migrated by an upgrade; they stay as files in `/status/data/workflows` on the data volume.
 
 ## Writing configuration
 

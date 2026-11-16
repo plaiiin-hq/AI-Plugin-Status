@@ -230,6 +230,6 @@ which has no replacement on this chain; use `GET /api/history` and `GET /api/his
 > logs viewer, history) are being replaced by the SPA frontend
 > at `/app`. Thymeleaf will remain only for email templates.
 >
-> The legacy **incidents** pages are already gone, model and all: an incident is now a record of
-> workflow type `incident` under `/api/workflows/**`. There is no `/api/incidents` — it answers
-> `404`. See `SKILL.md` → *Incidents*.
+> The **incidents** pages are gone, model and all, and so is the embedded workflow engine that
+> replaced them (since `v1.0.0-pre.13`): `/api/incidents` and `/api/workflows/**` both answer
+> `404`. Who is on a problem is a handled reference. See `SKILL.md` → *Incidents*.
