@@ -338,7 +338,7 @@ and records a history entry in one call — `200 {"status":"ok"}`, or `409`/`400
 `{"error": {"code", "message"}}`. Requires `STATUS_ADMIN` or `INFRA_ADMIN`.
 
 Add `?dryRun=true` to get the same report **without writing anything** — refs resolved and
-missed, probes bound to agents that do not exist, how many probes the config would generate.
+unverified, probes bound to agents that do not exist, how many probes the config would generate.
 Do that before every change.
 
 ⚠️ A real save does not refuse a broken config; it applies it and reports the problems

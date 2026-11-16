@@ -75,8 +75,11 @@ projects:
             links: []
 ```
 
-`refs` are **whitespace-sensitive path strings** matched against the live tree — a miss
-renders an empty node, silently. `references` is the structured form and additionally carries
+`refs` are **whitespace-sensitive path strings** matched against the live tree. A ref may name a
+check, or a node a check publishes at run time (`Agents / <host> / <container>` for one container
+of `docker-services`; copy it from `/api/tree`). A miss is one grey UNKNOWN row that names the ref
+(`Nothing on the board is at "…"`) since `v1.0.0-pre.11`; before that it rendered an empty node,
+silently, and the empty branch showed green. `references` is the structured form and additionally carries
 an `action`, which is what puts a working button on the card.
 
 ## `dependencies`
