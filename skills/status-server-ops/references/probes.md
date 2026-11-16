@@ -386,7 +386,7 @@ WARNING → ERROR   → escalation notification
 ERROR/WARNING → OK → recovery notification (includes outage duration)
 ```
 
-Probes tracked in an open incident skip standard alerts (incident-aware alerting).
+A probe somebody marked handled still alerts: handled dims it on the board and nothing more. Only a mute silences notifications.
 
 ## Chart UI
 

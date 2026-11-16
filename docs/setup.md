@@ -32,7 +32,7 @@ Keys inherit the roles of the user that minted them. **This is the decision that
 
 | Key kind | Roles | Can do | Use for |
 |---|---|---|---|
-| **Read** | `VIEWER` + `HISTORY_USER` | `/api/tree`, `/api/status`, `/api/probes/history`, workflow records | Dashboards, bots, ambient Claude sessions, CI checks |
+| **Read** | `VIEWER` + `HISTORY_USER` | `/api/tree`, `/api/status`, `/api/probes/history`, handled references | Dashboards, bots, ambient Claude sessions, CI checks |
 | **Admin** | `STATUS_ADMIN` or `INFRA_ADMIN` | Everything above **plus `/api/ide/**`** | Deliberate probe- and command-authoring sessions only |
 | **Release** | `STATUS_ADMIN` | Everything above **plus** releasing/activating a version, uninstalling an entry, adding a library | The moment code actually ships to your hosts |
 

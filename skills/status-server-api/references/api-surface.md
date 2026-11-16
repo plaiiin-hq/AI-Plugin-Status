@@ -280,6 +280,7 @@ project or host; the newer on a tie).
 | Endpoint | |
 |---|---|
 | `GET /api/handled` | `{active:[…]}`; `?history=true` adds `history:[…]` (newest 200) with `clearedAt` and `clearedReason` (`green` `done` `target-gone` `manual` `tracker`). Each reference: `id, target, url, title, system, externalId, note, createdBy, createdAt, clearAfterSeconds, greenSince, missingSince, clearedAt, clearedReason, active` |
+| `GET /api/handled?probe=<full check name>` | `{active:[…], history:[…]}`, both narrowed to the marks that covered that one check: set on it, on a branch or host above it, on a branch that refers to it, or on one of its todos. Newest first, at most 50, cleared ones included. Since `v1.0.0-pre.12` |
 | `PUT /api/handled` | `{target:{kind,type,path,todoId?}, url?, title?, system?, externalId?, note?, clearAfter?}` (`clearAfter`: seconds, or a duration such as `"30m"`; at least 1 s). Replaces the active reference on that target; the same `system`+`externalId` again changes nothing. Errors `{error:{code,message}}`: `400` `missing_target`, `missing_fields` (+`missing:[…]`), `bad_target`, `bad_clear_after`, `invalid_field` (`url` 2048, `title` 300, `externalId` 200, `note` 2000 characters; the message names the field), `bad_request`; `404 unknown_target` (nothing on the board under that target; nothing stored); `409 conflict` (someone else marked it at the same moment); `500 not_stored` (the write itself failed; nothing stored) |
 | `DELETE /api/handled?kind=&type=&path=&todoId=` | `{ok:true}`, or `{ok:false}` when nothing was active. Reason `tracker` for an API key, `manual` for a session or a bearer token |
 | `GET /api/handled/trackers` | enabled connectors `[{id, displayName, kind}]` |
@@ -293,46 +294,10 @@ No `GET /api/handled/trackers/config/{id}` exists; `config` is a reserved tracke
 
 ## Workflows
 
-User-defined record types with a state machine — the system that replaced legacy incidents. A
-*type* declares fields, nodes (states) and edges (transitions); an *instance* is one record
-moving through it. `GET /api/workflows/types` lists what exists, `POST /api/workflows/{type}`
-creates a record, and `POST /api/workflows/{type}/{id}/transitions` moves it along an edge.
-
-⚠️ **`name` is an i18n map, not a string** — `{"en":"Incident","de":"Vorfall"}`. A client that
-renders it directly prints an object. The same applies to type and field labels throughout this
-subsystem.
-
-An edge may carry `requireFields`, `requireRole` and a `when` expression. ⚠️ `when` is a **hard
-gate** in this implementation: a transition whose condition is false is refused with
-`when_condition_false`, not allowed through with a warning.
-
-| Endpoint | |
-|---|---|
-| `GET /api/workflows/attachable?kind=` | Types that declare an attach point for that ref kind. ⚠️ `kind` is **required** — omit it and you get a 400 |
-| `GET /api/workflows/field-types` | The field-type definitions this server resolved, for the SPA |
-| `GET /api/workflows/types` |  |
-| `POST /api/workflows/types` 🔒 | |
-| `GET /api/workflows/types/{id}` | One type's whole state machine — nodes, edges, fields |
-| `PUT /api/workflows/types/{id}` 🔒 | |
-| `GET /api/workflows/{type}/scripts/{filename}` 🔒 · `PUT` 🔒 | A type's action scripts |
-| `GET /api/workflows/{type}` | List instances |
-| `POST /api/workflows/{type}` | Create one — `{id?, fields:{…}}`, answers `201` |
-| `PATCH /api/workflows/{type}/{id}/fields` | `{fields:{…}, version}` — edit without transitioning |
-| `DELETE /api/workflows/{type}/{id}` |  |
-| `GET /api/workflows/{type}/{id}` |  |
-| `POST /api/workflows/{type}/{id}/actions/{actionId}` |  |
-| `GET /api/workflows/{type}/{id}/archived` |  |
-| `POST /api/workflows/{type}/{id}/attach` |  |
-| `DELETE /api/workflows/{type}/{id}/attach/{refKind}/{refId}` |  |
-| `POST /api/workflows/{type}/{id}/comments` | `{text}` — ⚠️ the field is `text`, not `content` or `comment`; a wrong name posts an empty comment and answers `204` |
-| `POST /api/workflows/{type}/{id}/fields/{fieldName}/files` |  |
-| `DELETE /api/workflows/{type}/{id}/fields/{fieldName}/files/{filename:.+}` |  |
-| `GET /api/workflows/{type}/{id}/fields/{fieldName}/files/{filename:.+}` |  |
-| `GET /api/workflows/{type}/{id}/fields/{fieldName}/files/{filename:.+}/thumbnail` |  |
-| `POST /api/workflows/{type}/{id}/references` | Attach a reference (e |
-| `DELETE /api/workflows/{type}/{id}/references/{kind}` | Remove a reference from an instance's { |
-| `POST /api/workflows/{type}/{id}/transitions` | `{to, version, edgeId?, fields?, override?}`. `override` is opt-in — absent or false means a failed flow rule is a hard error |
-| `POST /api/workflows/{type}/{id}/unarchive` |  |
+None. The embedded workflow engine left Status with `v1.0.0-pre.13` (2026-11-16): every path under
+`/api/workflows` answers `404`, and there are no incident records. See *Handled* above for what
+replaces them. A server older than that still answers the 26 workflow endpoints an earlier
+revision of this file listed.
 
 ## Messaging
 

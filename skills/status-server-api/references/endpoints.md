@@ -34,7 +34,7 @@
 | GET | `/api/global` | API Key/JWT | Global settings (service name, theme) |
 | GET | `/api/events` | API Key/JWT | Event log (query: `hours`) |
 | GET | `/api/events/stream` | API Key/JWT | SSE real-time event stream |
-| GET | `/api/untracked-issues` | API Key/JWT | Errors nobody marked handled and no workflow record covers |
+| GET | `/api/untracked-issues` | API Key/JWT | Errors and warnings nobody marked handled or muted |
 | GET | `/api/auth-config` | Public | Auth provider configuration |
 
 ## Probes
