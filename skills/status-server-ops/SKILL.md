@@ -13,7 +13,8 @@ host being monitored — that is the one exception, and it is a one-time step pe
 > **Two rules dominate everything below.**
 >
 > 1. **Most wiring mistakes here fail as silence, not as errors.** A misrouted probe never
->    runs; a mistyped `ref` renders an empty node; a layout tile whose path was never emitted
+>    runs; a mistyped `ref` is one grey UNKNOWN row (an empty, green node before
+>    `v1.0.0-pre.11`); a layout tile whose path was never emitted
 >    is skipped without complaint. All three look like health. **Verify, don't assume** — see
 >    *Verifying* at the end, and do it every time.
 > 2. **Never restart the server to apply a change.** It drops every logged-in session, and it
@@ -255,14 +256,20 @@ otherwise only production can:
   "status": "ok_with_warnings",
   "dryRun": true,
   "probes": { "wouldGenerate": 54 },
-  "refs":   { "resolved": 61, "missed": ["Public Site / Web / API -> Agents / app-01 / Web Reachabl"] },
+  "refs":   { "resolved": 61, "unverified": ["Public Site / Web / API -> Agents / app-01 / Web Reachabl"] },
   "agents": { "bound": 12, "unknown": ["SSH -> agent 'app-03.example.com'"] },
-  "warnings": ["1 project ref(s) resolve to nothing and will render as empty nodes. …"]
+  "warnings": ["1 project ref(s) could NOT be verified. A ref may still be correct: probes publish runtime children … Confirm each against /api/tree before assuming it is broken. …"]
 }
 ```
 
-**Do this before every config change.** A missed ref and a phantom agent are traps 1 and 2,
-and this is the only way to see them without applying the change to a live board first.
+**Do this before every config change.** A phantom agent and a ref that matches nothing are
+traps 1 and 2, and this is the only way to see them without applying the change to a live board
+first.
+
+`unverified` means "nothing by that name is known **yet**", not "wrong": a ref to a node a check
+publishes at run time (one container of `docker-services`) is only known after that check has
+run, and right after a server restart nothing is. A ref that is still unverified once every
+check has reported is a typo.
 
 > ⚠️ **The save does not refuse a broken config.** It applies whatever you send. It now
 > *reports* what went wrong — the same `refs`/`agents`/`warnings` block as the dry run, with
@@ -707,8 +714,8 @@ Full detail: `references/credentials-store.md`.
 | # | Trap | Rule |
 |---|---|---|
 | 1 | **Decomposed `host:`/`port:` binds the probe to an agent named after the HOST.** On a host with **no agent installed**, the probe is assigned to an agent that does not exist and simply never runs — no result, no warning, no red. | On an agentless host every probe MUST use `target:` (including `target: tcp://host:port`). That leaves the agent null, so the **server** runs it. |
-| 2 | **A project `ref` that misses resolves to an empty node** — the resolver returns null silently. You get a blank card, not an error. | Cross-check every `ref` against the live `/api/tree`. Mind the spaces around the `/` separators. |
-| 3 | **A probe's runtime children hang off the HOST, not off the probe.** `docker-services` publishes one node per container via `scriptResult.services`, and those land at `Agents / <host> / <containerName>` — **not** under the probe's own name. Refs written as `Agents / <host> / Docker / <container>` match nothing and render empty. (The `<stack>/<service>` form is a `streamValues` path, used by `ctx.action` and `ctx.log.ref` — never a ref.) | Copy the exact path from `/api/tree`. Never assemble a ref by hand from the probe name. |
+| 2 | **A project `ref` that matches nothing.** Since `v1.0.0-pre.11` it is drawn: one grey UNKNOWN row with the message `Nothing on the board is at "<ref>": check the spelling, or the check that publishes it has not run yet`, and the service, app and project above it are UNKNOWN, not green. **On an older server it is silent**: the resolver returns null, the branch is empty, and the empty branch rolls up as OK — a green row that checks nothing. | Cross-check every `ref` against the live `/api/tree`. Mind the spaces around the `/` separators. An UNKNOWN row with that message for about a minute after a restart is the check not having run yet; one that stays is a typo. |
+| 3 | **A probe's runtime children are NAMED under the host, not under the probe.** `docker-services` publishes one node per container via `scriptResult.services`. `/api/tree`, history and the config check know such a node as `Agents / <host> / <containerName>`, with the probe's own name left out, and that is the ref to write. Since `v1.0.0-pre.11` the board draws it: the container with its State, CPU, Memory and Image under the service, and the service takes the container's state. **Before `v1.0.0-pre.11` such a ref drew nothing** although the config check called it resolved, and the empty service showed green. (The `<stack>/<service>` form is a `streamValues` path, used by `ctx.action` and `ctx.log.ref` — never a ref.) | Copy the exact path from `/api/tree`. Never assemble a ref by hand from the probe name. |
 | 4 | **The server has no JS sandbox** — 7 native checkers only. Any JS catalog probe run **server-side** degrades to `HTTP_HEALTH`. An `ssl-certificate` probe will report "HTTP 200" while checking no expiry whatsoever. | Name server-side probes for what they do — "Web Reachable", not "SSL Certificate". A real cert or Docker probe needs an **agent on the box**. ⚠️ **Any HTTP target field in the config entry (`target:` OR `url:`) hands the probe to the server**, even with `agent:` set. For a CUSTOM JS probe the symptom is a hard `No script source for probe`, because the server has no copy of your script. Give the config entry only `name`/`probe`/`agent`/`params`, and put the URL in the probe.yml param's `default:` — that is what makes it run on the agent. |
 | 5 | **A widget the probe card does not know renders NOTHING.** The card's renderer has no fallback branch, so a tile naming a topology-only widget (`flame`, `odometer`, `uptime-strip`, …) produces an empty cell — no error, no warning, no log line. Same for a `path` the probe never emits. | Keep board tiles inside `value` `gauge` `chart` `bar` `bars` unless you deliberately want a card-only widget. See the vocabulary table above. |
 | 6 | **A redeploy can overwrite config and the probe catalog.** If your deployment ships `infrastructure.yml` and the probe directory — most do, and some sync the probe folder with `--delete` — then a change made over the API or in the Probe IDE survives exactly until the next deploy, then vanishes with no error. It looks like the server "reverted" or lost your write. | Find out what your deployment ships before relying on an API change. Whatever it ships is the source of truth; put lasting changes there. See *Where a change actually lives* below. |

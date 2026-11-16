@@ -44,7 +44,7 @@ execute on every monitored host.
 
 Status is easy to configure and unusually easy to configure *wrongly in a way that looks
 fine*. A probe bound to a non-existent agent never runs and shows nothing. A project `ref`
-with one wrong space renders an empty card. An `ssl-certificate` probe running server-side
+with one wrong space checks nothing (a grey UNKNOWN row since `v1.0.0-pre.11`, an empty green card before). An `ssl-certificate` probe running server-side
 degrades to a plain HTTP check and reports "HTTP 200" while checking no expiry at all.
 
 None of those produce an error. All of them produce a board that looks healthy.

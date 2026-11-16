@@ -194,7 +194,7 @@ Better than per-probe params because it applies estate-wide and lives in one pla
 
 ## 9. Verify before you believe it
 
-**Dry-run the config before applying it** — writes nothing, and reports missed refs and
+**Dry-run the config before applying it** — writes nothing, and reports unverified refs and
 phantom agents up front:
 
 ```bash
