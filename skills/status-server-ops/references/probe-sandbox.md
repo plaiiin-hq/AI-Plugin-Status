@@ -35,6 +35,22 @@ res.ok       // true if 2xx
 res.elapsed  // milliseconds
 ```
 
+**`ctx.http` throws when no connection can be made** (a refused port, a host name that does not
+resolve, a timeout): there is no `res` to read `ok` from, and the Java exception often has no
+message. An uncaught one ends the check as an ERROR. From `v1.0.0-pre.16` its message names the
+type, the cause and the script line (`ConnectException with no message (script line 69)`); an
+older agent says `PolyglotException: null`. A probe that tries an address which may not be there
+wraps the call, as the `traefik` probe does since 1.0.1:
+
+```js
+function tryGet(url) {
+  try { return ctx.http.get(url) }
+  catch (e) { return { ok: false, status: 0, body: '', error: String(e && e.message ? e.message : e) } }
+}
+```
+
+`ctx.socket` and `ctx.tcp` do not throw for this: they answer `ok: false` with a `message`.
+
 ### ctx.tcp — TCP Connections
 
 ```js
