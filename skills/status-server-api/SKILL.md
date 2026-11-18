@@ -72,10 +72,13 @@ curl -s -X POST -H "$K" -H 'Content-Type: application/json' \
   "$STATUS_URL/api/user/api-keys"
 ```
 
-Roles: `VIEWER` `HISTORY_USER` `HISTORY_CONFIG` `INCIDENT_RESPONDER` `INCIDENT_MANAGER`
-`DRILL_RESPONDER` `DRILL_MANAGER` `PROBE_EDITOR` `WORK_USER` `STATUS_ADMIN` `INFRA_ADMIN`.
+Roles: `VIEWER` `HISTORY_USER` `HISTORY_CONFIG` `DRILL_RESPONDER` `DRILL_MANAGER` `PROBE_EDITOR`
+`WORK_USER` `STATUS_ADMIN` `INFRA_ADMIN`.
 
-`INCIDENT_RESPONDER` and `INCIDENT_MANAGER` still exist and gate nothing since `v1.0.0-pre.13`.
+`INCIDENT_RESPONDER` and `INCIDENT_MANAGER` are gone since `v1.0.0-pre.18`. On a server from then on, asking for one
+in `roles` is refused with `roles_not_held`, and a key that was scoped to one of them before the
+upgrade keeps that scope and reaches nothing (`403`): create a new key. An older server still
+lists both; they gate nothing there since `v1.0.0-pre.13`.
 
 `WORK_USER` gates the work lane and the todos probes report, and it **hides** rather than
 disables: a key without it does not see the lane at all. If a board's work column looks
